@@ -1,0 +1,132 @@
+services:
+  api_service:
+    build: ./src/api
+    container_name: api_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src/api:/app
+    environment:
+      - DATABASE_URL=postgresql://sdg_service:${POSTGRES_PASSWORD}@database_service:5432/sdg_db
+    depends_on:
+      database_service:
+        condition: service_healthy
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+
+  database_service:
+    image: postgres:16-alpine
+    container_name: database_service
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+
+  weaviate_service:
+    image: semitechnologies/weaviate:1.24.1
+    container_name: weaviate_service
+    ports:
+      - "8080:8080"
+    environment:
+      - QUERY_DEFAULTS_LIMIT=25
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - DEFAULT_VECTORIZER_MODULE=text2vec-transformers
+      - ENABLE_MODULES=text2vec-transformers
+      - TRANSFORMERS_INFERENCE_API=http://weaviate_transformer_service:8080
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "curl", "-sfX", "GET", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      weaviate_transformer_service:
+        condition: service_healthy
+    
+  weaviate_transformer_service:
+    ports:
+      - "8081:8080"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: custom-weaviate-transformer:latest
+    container_name: weaviate_transformer_service
+    environment:
+      - ENABLE_GPU=0
+    healthcheck:
+      test: ["CMD", "curl", "-sfX", "GET", "http://localhost:8080/.well-known/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: '8G'
+
+  
+  data_retrieval_service:
+    build: ./src/data_retrieval
+    container_name: data_retrieval_service
+    volumes:
+      - ./src/data_retrieval:/app
+      - raw_data_volume:/app/raw_data
+    environment:
+      - DATABASE_URL=postgresql://sdg_service:${POSTGRES_PASSWORD}@database_service:5432/sdg_db
+    depends_on:
+      database_service:
+        condition: service_healthy
+    command: python main.py
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+
+  data_processing_service:
+    build: ./src/data_processing
+    container_name: data_processing_service
+    volumes:
+      - ./src/data_processing:/app
+      - raw_data_volume:/app/raw_data
+      - images_volume:/app/images
+    environment:
+      - DATABASE_URL=postgresql://sdg_service:${POSTGRES_PASSWORD}@database_service:5432/sdg_db
+      - WEAVIATE_URL=http://weaviate_service:8080
+    depends_on:
+      data_retrieval_service:
+        condition: service_started
+      database_service:
+        condition: service_healthy
+      weaviate_service:
+        condition: service_healthy
+      weaviate_transformer_service:
+        condition: service_healthy
+    command: python main.py
+    deploy:
+      resources:
+        limits:
+          cpus: '10.0'
+
+volumes:
+  postgres_data:
+  raw_data_volume:
+  weaviate_data:
+  images_volume:

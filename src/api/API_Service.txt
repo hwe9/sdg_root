@@ -1,0 +1,15 @@
+API_Service.txt
+
+API Service (FastAPI)
+Dieser Service stellt die Verbindung zwischen dem Frontend der Plattform und den internen Diensten her.
+
+Aufgaben:
+
+Frontend-Kommunikation: Empfängt Anfragen von der Benutzeroberfläche (z. B. Abfragen für interaktive Dashboards oder Szenarien).
+
+Abfrage-Verwaltung: Verarbeitet die Anfragen und leitet sie an die entsprechenden Backend-Services weiter. Beispielsweise würde eine Suchanfrage an den Database Service geleitet, um relevante Vektoren und Metadaten abzurufen.
+
+Ergebnis-Aggregation: Konsolidiert die Ergebnisse aus den verschiedenen Diensten und bereitet sie für die Ausgabe an das Frontend auf.
+
+
+Sicherheit: Stellt sicher, dass alle Datenabfragen und -transaktionen sicher sind (z. B. Authentifizierung, Autorisierung, DSGVO-Konformität )

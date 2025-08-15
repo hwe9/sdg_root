@@ -1,0 +1,30 @@
+# Temporäre Dateien und Verzeichnisse, die ignoriert werden sollen
+
+# Python-spezifische Ignorierungen
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtuelle Umgebungen
+.venv/
+venv/
+
+# Environment-Dateien mit sensiblen Daten
+.env
+
+# Von Visual Studio Code generierte Dateien
+.vscode/
+
+# Build-Dateien
+/dist/
+/build/
+
+# Log-Dateien
+logs/
+*.log
+
+# Daten und Downloads (sollten nicht im Git-Repository gespeichert werden)
+data/
+src/whisper/
+src/sdg_zip/

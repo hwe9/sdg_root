@@ -1,0 +1,20 @@
+Processing_Service.txt
+
+Processing Service
+Dieser Service verarbeitet die Rohdaten, um sie für die Vektorisierung vorzubereiten.
+
+Aufgaben:
+
+Dateityp-Erkennung: Identifiziert den Dateityp der heruntergeladenen Inhalte (PDF, Video, Audio).
+
+Audiotranskription: Nutzt die Open-Source-Bibliothek Whisper, um Audio- und Videoinhalte zu transkribieren.
+
+Textextraktion: Extrahiert reinen Text aus PDFs oder anderen Dokumenten.
+
+Spracherkennung & Übersetzung: Ermittelt die Sprache des Textes. Falls der Text nicht auf Englisch vorliegt, wird er ins Englische übersetzt, um eine einheitliche Datenbasis für die KI-Verarbeitung zu schaffen.
+
+Textaufbereitung: Bereitet den Text für die Vektorisierung vor, indem er ihn in semantische Chunks aufteilt.
+
+Tagging: Fügt den Text-Chunks Metadaten (z. B. Quelle, Autor, Datum) hinzu.
+
+Queue-Befüllung: Leitet die vorbereiteten Text-Chunks an den Vectorization Service weiter, indem er eine entsprechende Aufgabe in der Task Queue erstellt.
