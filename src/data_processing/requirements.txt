@@ -8,4 +8,4 @@ requests
 Pillow
 pytesseract
 deep_translator
-weaviate-client
+weaviate-client>=4.0.0

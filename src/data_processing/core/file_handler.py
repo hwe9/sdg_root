@@ -5,6 +5,7 @@ import PyPDF2
 from PIL import Image
 import pytesseract
 import fitz  # PyMuPDF
+import datetime
 
 class FileHandler:
     def __init__(self, images_dir):
@@ -27,7 +28,14 @@ class FileHandler:
                     image_path = os.path.join(self.images_dir, f"{doc_name}_page{page_index+1}_img{image_index}.{file_extension}")
                     with open(image_path, "wb") as f:
                         f.write(image_bytes)
-                    image_paths.append(image_path)
+                    image_paths.append({
+                        "original_path": image_path,
+                        "page": page_index + 1,
+                        "caption": None,  # Optional bei OCR/Meta extrahieren!
+                        "sdg_tags": {},
+                        "ai_tags": None,
+                        "image_type": file_extension
+                    })
         except Exception as e:
             print(f"Fehler beim Extrahieren von Bildern aus PDF: {e}")
         return image_paths
@@ -43,7 +51,14 @@ class FileHandler:
                     image_path = os.path.join(self.images_dir, f"{doc_name}_{os.path.basename(image_part.partname)}")
                     with open(image_path, "wb") as f:
                         f.write(image_part.blob)
-                    image_paths.append(image_path)
+                    image_paths.append({
+                        "original_path": image_path,
+                        "page": None,
+                        "caption": None,
+                        "sdg_tags": {},
+                        "ai_tags": None,
+                        "image_type": os.path.splitext(image_path)[-1].replace('.', '')
+                    })
         except Exception as e:
             print(f"Fehler beim Extrahieren von Bildern aus DOCX: {e}")
         return image_paths
@@ -110,11 +125,9 @@ class FileHandler:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-    
+
     def cleanup_processed_data(self, directory: str, retention_days: int):
-        """
-        Löscht Dateien in einem Verzeichnis, die älter als `retention_days` sind.
-        """
+        """Löscht Dateien in einem Verzeichnis, die älter als retention_days sind."""
         print(f"Starte Bereinigung von {directory}...")
         now = datetime.datetime.now()
         for filename in os.listdir(directory):

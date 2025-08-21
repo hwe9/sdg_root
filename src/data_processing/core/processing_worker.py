@@ -1,4 +1,3 @@
-# sdg_root/src/data_processing/core/processing_worker.py
 import os
 import time
 from .file_handler import FileHandler
@@ -6,15 +5,17 @@ from .processing_logic import ProcessingLogic
 from .db_utils import save_to_database
 
 class ProcessingWorker:
-    def __init__(self, raw_data_dir: str, processed_data_dir: str, database_url: str):
+    def __init__(self, raw_data_dir: str, processed_data_dir: str, database_url: str,
+                 whisper_model=None, sentence_model=None):
         self.raw_data_dir = raw_data_dir
         self.processed_data_dir = processed_data_dir
         self.database_url = database_url
-        self.file_handler = FileHandler()
+        self.file_handler = FileHandler(images_dir=os.path.join(processed_data_dir, "images"))
         self.processing_logic = ProcessingLogic(whisper_model, sentence_model)
+        os.makedirs(self.processed_data_dir, exist_ok=True)
 
     def run_worker(self):
-        """Überwacht das RAW_DATA_DIR auf neue Dateien und verarbeitet sie."""
+        """Laufender Worker für alle JSON-Metadatendateien in raw_data_dir"""
         print("Starte Data Processing Service...")
         while True:
             json_files = [f for f in os.listdir(self.raw_data_dir) if f.endswith('.json')]
@@ -27,8 +28,17 @@ class ProcessingWorker:
                 try:
                     metadata_path = os.path.join(self.raw_data_dir, json_file_name)
                     metadata = self.file_handler.get_metadata_from_json(metadata_path)
-                    
                     base_name = os.path.splitext(json_file_name)[0]
+
+                    # Erweiterung: Bilder aus Medien extrahieren (optional)
+                    # image_data = []
+                    # if media_path.endswith('.pdf'):
+                    #    image_data = self.file_handler._extract_images_from_pdf(media_path, base_name)
+                    # elif media_path.endswith('.docx'):
+                    #    image_data = self.file_handler._extract_images_from_docx(media_path, base_name)
+                    # ... an API/db_utils übergeben ...
+
+                    # Suche nach zugehöriger Mediendatei
                     media_path = None
                     for ext in ['.mp3', '.txt', '.pdf', '.docx', '.csv']:
                         potential_path = os.path.join(self.raw_data_dir, f"{base_name}{ext}")
@@ -41,22 +51,53 @@ class ProcessingWorker:
                         os.remove(metadata_path)
                         continue
 
-                    text_content = ""
+                    # Inhalt extrahieren
                     if media_path.endswith('.mp3'):
                         text_content = self.processing_logic.transcribe_audio(media_path)
                     else:
                         text_content = self.file_handler.extract_text(media_path)
-                    
+
                     processed_data = self.processing_logic.process_text_for_ai(text_content)
-                    metadata['tags'] = processed_data['tags']
+                    # Setze alle neuen Felder auf das Metadatenobjekt
+                    for k, v in processed_data.items():
+                        metadata[k] = v
+
+                    # Embeddings als Output für Weaviate
                     embeddings = processed_data['embeddings']
-                    
+
+                    # Datenbank speichern (DB + Vektor)
                     save_to_database(metadata, text_content, embeddings)
-                    
+
+                    # Optional: Backup/Output
+                    backup_path = os.path.join(self.processed_data_dir, f"{base_name}_processed.json")
+                    with open(backup_path, 'w', encoding='utf-8') as f:
+                        import json
+                        json.dump({
+                            "metadata": metadata,
+                            "text": text_content,
+                            "embeddings": embeddings
+                        }, f, indent=4)
                     os.remove(metadata_path)
                     os.remove(media_path)
                     print(f"Verarbeitung von {json_file_name} erfolgreich. Dateien gelöscht.")
 
                 except Exception as e:
                     print(f"Fehler beim Verarbeiten von {json_file_name}: {e}")
-                    time.sleep(10)
+                    time.sleep(5)
+
+if __name__ == "__main__":
+    RAW_DATA_DIR = "/app/raw_data"
+    PROCESSED_DATA_DIR = "/app/processed_data"
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    from faster_whisper import WhisperModel
+    from sentence_transformers import SentenceTransformer
+    whisper_model = WhisperModel("small", device="cpu")
+    sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+    worker = ProcessingWorker(
+        raw_data_dir=RAW_DATA_DIR,
+        processed_data_dir=PROCESSED_DATA_DIR,
+        database_url=DATABASE_URL,
+        whisper_model=whisper_model,
+        sentence_model=sentence_model
+    )
+    worker.run_worker()

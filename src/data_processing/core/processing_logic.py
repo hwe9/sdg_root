@@ -1,6 +1,10 @@
 import re
 from .ai_models import whisper_model, sentence_model
 from deep_translator import GoogleTranslator
+from .vektorizer.text_vectorizer import TextVectorizer
+import pytesseract
+from PIL import Image
+text_vectorizer = TextVectorizer()
 
 class ProcessingLogic:
     def __init__(self, whisper_model, sentence_model):
