@@ -10,6 +10,7 @@ class AiTopicCreate(AiTopicBase):
 
 class AiTopic(AiTopicBase):
     id: int
+
     class Config:
         from_attributes = True
 
@@ -21,6 +22,7 @@ class TagCreate(TagBase):
 
 class Tag(TagBase):
     id: int
+
     class Config:
         from_attributes = True
 
@@ -33,6 +35,7 @@ class SdgCreate(SdgBase):
 
 class Sdg(SdgBase):
     id: int
+
     class Config:
         from_attributes = True
 
@@ -46,6 +49,7 @@ class ActorCreate(ActorBase):
 
 class Actor(ActorBase):
     id: int
+
     class Config:
         from_attributes = True
 
@@ -57,46 +61,50 @@ class SdgProgressBase(BaseModel):
 
 class SdgProgress(SdgProgressBase):
     id: int
+
     class Config:
         from_attributes = True
 
 class ArticleBase(BaseModel):
     title: str
-    content: str
-    sdg_id: Optional[int] = None
-    
-    # Bibliographische Daten
-    authors: Optional[str] = None
-    publication_year: Optional[int] = None
-    publisher: Optional[str] = None
-    doi: Optional[str] = None
-    isbn: Optional[str] = None
-    
-    # Regionale Relevanz
-    region: Optional[str] = None
-    context: Optional[str] = None
-    
-    # Forschungsdesign und Methode
-    study_type: Optional[str] = None
-    research_methods: Optional[str] = None
-    data_sources: Optional[str] = None
-    
-    # Finanzierer und Interessenlage
-    funding_info: Optional[str] = None
-    bias_indicators: Optional[str] = None
-    
-    # Kurzbeschreibung und Abstract
-    abstract: Optional[str] = None
-    relevance_questions: Optional[str] = None
-    
-    # Zitierlink/Weblink
-    source_url: Optional[str] = None
-    availability: Optional[str] = None
-    
-    # Evaluations- und Impact-Informationen
-    citation_count: Optional[int] = None
-    impact_factor: Optional[float] = None
-    policy_impact: Optional[str] = None
+    content_original: Optional[str]
+    content_english: Optional[str]
+    keywords: Optional[str]
+    sdg_id: Optional[int]
+    authors: Optional[str]
+    publication_year: Optional[int]
+    publisher: Optional[str]
+    doi: Optional[str]
+    isbn: Optional[str]
+    region: Optional[str]
+    context: Optional[str]
+    study_type: Optional[str]
+    research_methods: Optional[str]
+    data_sources: Optional[str]
+    funding: Optional[str]
+    funding_info: Optional[str]
+    bias_indicators: Optional[str]
+    abstract_original: Optional[str]
+    abstract_english: Optional[str]
+    relevance_questions: Optional[str]
+    source_url: Optional[str]
+    availability: Optional[str]
+    citation_count: Optional[int]
+    impact_metrics: Optional[dict]
+    impact_factor: Optional[float]
+    policy_impact: Optional[str]
+    tags: Optional[List[str]] = []
+    ai_topics: Optional[List[str]] = []
+
+class ImageBase(BaseModel):
+    article_id: int
+    original_path: str
+    ocr_text: Optional[str]
+    page: Optional[int]
+    caption: Optional[str]
+    sdg_tags: Optional[dict]
+    ai_tags: Optional[str]
+    image_type: Optional[str]
 
 class ArticleCreate(ArticleBase):
     pass
@@ -106,5 +114,6 @@ class Article(ArticleBase):
     created_at: datetime
     tags: List[Tag] = []
     ai_topics: List[AiTopic] = []
+
     class Config:
         from_attributes = True

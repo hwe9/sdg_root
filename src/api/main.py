@@ -1,13 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-
 import models, schemas
 from database import get_db
 
 app = FastAPI()
 
-@app.get("/")
 def read_root():
     return {"message": "API Service is running!"}
 
@@ -32,6 +30,19 @@ def read_article(article_id: int, db: Session = Depends(get_db)):
     if db_article is None:
         raise HTTPException(status_code=404, detail="Article not found")
     return db_article
+
+@app.post("/images/", response_model=schemas.ImageBase)
+def create_image(image: schemas.ImageBase, db: Session = Depends(get_db)):
+    db_image = models.Image(**image.dict())
+    db.add(db_image)
+    db.commit()
+    db.refresh(db_image)
+    return db_image
+
+@app.get("/images/{article_id}", response_model=List[schemas.ImageBase])
+def get_images(article_id: int, db: Session = Depends(get_db)):
+    images = db.query(models.Image).filter(models.Image.article_id == article_id).all()
+    return images
 
 # --- CRUD Endpunkte für SDGs ---
 
