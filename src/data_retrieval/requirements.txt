@@ -1,3 +1,11 @@
+weaviate-client>=4.0.0
 requests
 yt-dlp
-beautifulsoup4
+sentence-transformers
+faster-whisper
+PyPDF2
+python-docx
+sqlalchemy
+psycopg2-binary
+pytest
+
