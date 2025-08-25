@@ -3,4 +3,16 @@ uvicorn[standard]
 python-dotenv
 pydantic
 sqlalchemy[asyncio]
-psycopg2-binary
+psycopg2-binaryfastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-dotenv==1.0.0
+pydantic==2.5.0
+sqlalchemy[asyncio]==2.0.23
+psycopg2-binary==2.9.7
+alembic==1.13.1
+redis==5.0.1
+celery==5.3.4
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dateutil==2.8.2

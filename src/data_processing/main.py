@@ -117,10 +117,12 @@ def run_processing_worker():
                 else:
                     text_content = file_handler.extract_text(media_path)
                 
-                processed_data = processing_logic.process_text_for_ai(text_content)
-                metadata['tags'] = processed_data['tags']
-                metadata['abstract'] = processed_data['abstract']
-                embeddings = processed_data['embeddings']
+                if len(text_content) > 1000:  # Use chunking for large documents
+                    chunks_data = processing_logic.process_text_with_chunking(text_content)
+                    save_to_database_with_chunks(metadata, text_content, chunks_data['chunks'], chunks_data['embeddings'])
+                else:
+                    processed_data = processing_logic.process_text_for_ai(text_content)
+                    save_to_database(metadata, text_content, processed_data['embeddings'])
 
                 # Speichern in DB
                 save_to_database(metadata, text_content, embeddings)

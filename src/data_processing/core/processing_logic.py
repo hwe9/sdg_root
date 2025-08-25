@@ -1,64 +1,64 @@
+# Enhanced processing_logic.py
 import re
-from .ai_models import whisper_model, sentence_model
+from .text_chunker import SDGTextChunker
+from .keywords import sdg_keywords_dict
 from deep_translator import GoogleTranslator
-from .vektorizer.text_vectorizer import TextVectorizer
 import pytesseract
 from PIL import Image
-text_vectorizer = TextVectorizer()
 
 class ProcessingLogic:
     def __init__(self, whisper_model, sentence_model):
         self.whisper_model = whisper_model
         self.sentence_model = sentence_model
-
-    def transcribe_audio(self, audio_path: str) -> str:
-        print(f"Transkribiere Audio: {audio_path}...")
-        segments, _ = self.whisper_model.transcribe(audio_path, beam_size=5)
-        full_text = " ".join(segment.text for segment in segments)
-        return full_text
-
-    def extract_abstract_and_keywords(self, text_content: str) -> dict:
-        abstract = None
-        keywords = []
-        abstract_match = re.search(r'abstract\n(.*?)\n\n', text_content, re.IGNORECASE | re.DOTALL)
-        if abstract_match:
-            abstract = abstract_match.group(1).strip()
-        keywords_match = re.search(r'keywords:\s*(.*)', text_content, re.IGNORECASE)
-        if keywords_match:
-            keywords = [k.strip() for k in keywords_match.group(1).split(',') if k.strip()]
-        return {'abstract': abstract, 'keywords': keywords}
-
-    def process_text_for_ai(self, text_content: str):
-        embeddings = self.sentence_model.encode(text_content).tolist()
-        tags = []
-        if "klimawandel" in text_content.lower() or "climate change" in text_content.lower():
-            tags.append("SDG 13")
-        if "armut" in text_content.lower() or "poverty" in text_content.lower():
-            tags.append("SDG 1")
-
-        extracted_info = self.extract_abstract_and_keywords(text_content)
-        tags.extend(extracted_info['keywords'])
+        self.text_chunker = SDGTextChunker(chunk_size=512, overlap=50)
+    
+    def process_text_for_ai_with_chunking(self, text_content: str) -> Dict[str, Any]:
+        
+        if len(text_content) <= 512:
+            return self._process_single_chunk(text_content)
+        
+        chunks = self.text_chunker.chunk_by_sdg_sections(text_content)
+        chunks = self.text_chunker.generate_embeddings_for_chunks(chunks)
+        
+        processed_chunks = []
+        all_tags = set()
+        
+        for chunk in chunks:
+            chunk_data = self._process_single_chunk(chunk["text"])
+            chunk.update({
+                "sdg_tags": chunk_data["tags"],
+                "keywords": chunk_data.get("keywords", []),
+                "abstract": chunk_data.get("abstract")
+            })
+            processed_chunks.append(chunk)
+            all_tags.update(chunk_data["tags"])
         
         return {
-            "text": text_content,
-            "embeddings": embeddings,
-            "tags": list(set(tags)),
-            "abstract": extracted_info['abstract']
+            "chunks": processed_chunks,
+            "combined_tags": list(all_tags),
+            "total_chunks": len(processed_chunks),
+            "total_length": len(text_content)
         }
     
-    def translate_text(self, text: str, target_lang='en') -> str:
-        print(f"Übersetze Text in {target_lang}...")
-        try:
-            translated_text = GoogleTranslator(source='auto', target=target_lang).translate(text)
-            return translated_text
-        except Exception as e:
-            print(f"Fehler bei der Übersetzung: {e}")
-            return text
-    
-    def get_ocr_text(self, image_path: str) -> str:
-        """Führt OCR auf einem Bild durch."""
-        try:
-            return pytesseract.image_to_string(Image.open(image_path))
-        except Exception as e:
-            print(f"Fehler bei OCR: {e}")
-            return ""
+    def _process_single_chunk(self, text: str) -> Dict[str, Any]:
+        """Process a single chunk (your existing logic)."""
+        embeddings = self.sentence_model.encode(text).tolist()
+        tags = []
+        
+        text_lower = text.lower()
+        for sdg_name, keywords in sdg_keywords_dict.items():
+            for keyword in keywords:
+                if keyword.lower() in text_lower:
+                    tags.append(sdg_name)
+                    break
+        
+        extracted_info = self.extract_abstract_and_keywords(text)
+        tags.extend(extracted_info.get('keywords', []))
+        
+        return {
+            "text": text,
+            "embeddings": embeddings,
+            "tags": list(set(tags)),
+            "abstract": extracted_info.get('abstract'),
+            "keywords": extracted_info.get('keywords', [])
+        }

@@ -12,15 +12,20 @@ def get_weaviate_client():
     """Erstellt eine Weaviate-Client-Instanz."""
     return weaviate.Client(url=WEAVIATE_URL)
 
-def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: List[float]):
+def save_to_database(
+    metadata: Dict[str, Any],
+    text_content: str,
+    embeddings: List[float],
+    chunks_data: List[Dict] = None
+):
     """
     Speichert Metadaten in PostgreSQL und Vektoren in Weaviate.
-    Berücksichtigt alle neuen Felder: Mehrsprachigkeit, Impact-Metriken, Keywords, Tagging.
+    Optional: Speichert Chunks, falls chunks_data übergeben wird.
     """
     try:
         engine = create_engine(DATABASE_URL)
         with engine.connect() as connection:
-
+            # Save article as usual
             insert_query = text("""
                 INSERT INTO articles (
                     title, content_original, content_english, keywords, sdg_id, authors, publication_year,
@@ -66,10 +71,9 @@ def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: Li
                 "impact_factor": metadata.get('impact_factor'),
                 "policy_impact": metadata.get('policy_impact')
             })
-
             article_id = result.scalar_one()
 
-            # Tag-Relationen anlegen
+            # --- Tag relations exactly as before ---
             for tag_name in metadata.get('tags', []):
                 tag_id = connection.execute(
                     text("SELECT id FROM tags WHERE name = :name"),
@@ -85,7 +89,7 @@ def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: Li
                     {"article_id": article_id, "tag_id": tag_id}
                 )
 
-            # AI Topics analog, falls implementiert
+            # --- AI topics relations exactly as before ---
             for topic_name in metadata.get('ai_topics', []):
                 topic_id = connection.execute(
                     text("SELECT id FROM ai_topics WHERE name = :name"),
@@ -101,12 +105,31 @@ def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: Li
                     {"article_id": article_id, "topic_id": topic_id}
                 )
 
+            # --- NEW: Save chunks if provided ---
+            if chunks_data:
+                for i, chunk_data in enumerate(chunks_data):
+                    chunk_query = text("""
+                        INSERT INTO article_chunks (
+                            article_id, chunk_order, text, chunk_length, sdg_section, confidence_score
+                        ) VALUES (
+                            :article_id, :chunk_order, :text, :chunk_length, :sdg_section, :confidence_score
+                        )
+                    """)
+                    connection.execute(chunk_query, {
+                        "article_id": article_id,
+                        "chunk_order": i,
+                        "text": chunk_data["text"],
+                        "chunk_length": len(chunk_data["text"]),
+                        "sdg_section": chunk_data.get("sdg_section", "general"),
+                        "confidence_score": chunk_data.get("confidence_score", 0.0)
+                    })
+
             connection.commit()
             print(f"Metadaten für Artikel {article_id} in PostgreSQL gespeichert.")
 
-        # Vektor in Weaviate speichern
+        # --- Vector: always save in Weaviate, as in original code ---
         client = get_weaviate_client()
-        client.schema.get()  # Verbindung prüfen
+        client.schema.get()
         try:
             client.schema.get("ArticleVector")
         except weaviate.exceptions.UnexpectedStatusCodeException:
@@ -129,3 +152,5 @@ def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: Li
         time.sleep(10)
     except Exception as e:
         print(f"Fehler beim Speichern in der Datenbank: {e}")
+
+

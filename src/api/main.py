@@ -31,6 +31,91 @@ def read_article(article_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Article not found")
     return db_article
 
+@app.get("/articles/{article_id}/chunks")
+async def get_article_chunks(
+    article_id: int, 
+    sdg_filter: Optional[str] = None,
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    article = db.query(models.Article).filter(models.Article.id == article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+
+    query = db.query(models.ArticleChunk).filter(models.ArticleChunk.article_id == article_id)
+    
+    if sdg_filter:
+        query = query.filter(models.ArticleChunk.sdg_section == sdg_filter)
+    
+    chunks = query.order_by(models.ArticleChunk.chunk_order).limit(limit).all()
+    
+    return {
+        "article_id": article_id,
+        "total_chunks": len(chunks),
+        "chunks": chunks
+    }
+
+@app.get("/search/sdg/{sdg_id}/chunks")
+async def search_chunks_by_sdg(
+    sdg_id: int,
+    query: Optional[str] = None,
+    limit: int = 5,
+    db: Session = Depends(get_db)
+):
+    sdg = db.query(models.Sdg).filter(models.Sdg.id == sdg_id).first()
+    if not sdg:
+        raise HTTPException(status_code=404, detail="SDG not found")
+    
+    chunks_query = db.query(models.ArticleChunk).join(models.Article).filter(
+        models.Article.sdg_id == sdg_id
+    )
+    
+    if query:
+        chunks_query = chunks_query.filter(models.ArticleChunk.text.contains(query))
+    
+    chunks = chunks_query.limit(limit).all()
+    
+    return {
+        "sdg_id": sdg_id,
+        "sdg_name": sdg.name,
+        "query": query,
+        "results": chunks
+    }
+
+@app.get("/articles/{article_id}/summary")
+async def get_article_summary(
+    article_id: int,
+    max_chunks: int = 5,
+    db: Session = Depends(get_db)
+):
+    article = db.query(models.Article).filter(models.Article.id == article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    # Get most relevant chunks (ordered by importance/SDG relevance)
+    chunks = db.query(models.ArticleChunk).filter(
+        models.ArticleChunk.article_id == article_id
+    ).order_by(models.ArticleChunk.chunk_order).limit(max_chunks).all()
+    
+    if not chunks:
+        raise HTTPException(status_code=404, detail="No chunks found for article")
+    
+    # Generate summary from chunks
+    summary_text = " ".join([chunk.text[:200] + "..." for chunk in chunks])
+    
+    # Extract SDG information
+    sdg_sections = list(set([chunk.sdg_section for chunk in chunks if chunk.sdg_section]))
+    
+    return {
+        "article_id": article_id,
+        "article_title": article.title,
+        "summary": summary_text,
+        "sdg_sections": sdg_sections,
+        "chunk_count": len(chunks),
+        "generated_at": "2025-08-22T15:29:00Z"
+    }
+
 @app.post("/images/", response_model=schemas.ImageBase)
 def create_image(image: schemas.ImageBase, db: Session = Depends(get_db)):
     db_image = models.Image(**image.dict())

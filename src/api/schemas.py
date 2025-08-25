@@ -115,5 +115,65 @@ class Article(ArticleBase):
     tags: List[Tag] = []
     ai_topics: List[AiTopic] = []
 
+class ArticleChunkBase(BaseModel):
+    chunk_order: int
+    text: str
+    chunk_length: Optional[int] = None
+    sdg_section: Optional[str] = None
+    confidence_score: Optional[float] = 0.0
+
+class ArticleChunkCreate(ArticleChunkBase):
+    article_id: int
+
+class ArticleChunk(ArticleChunkBase):
+    id: int
+    article_id: int
+    created_at: datetime
+    
     class Config:
         from_attributes = True
+
+class Article(ArticleBase):
+    id: int
+    created_at: datetime
+    tags: List[Tag] = []
+    ai_topics: List[AiTopic] = []
+    chunks: List[ArticleChunk] = []  # NEW LINE
+    
+class SDGTargetBase(BaseModel):
+    target_id: str
+    goal_id: int
+    title_en: str
+    title_de: Optional[str] = None
+    title_fr: Optional[str] = None
+    title_es: Optional[str] = None
+    title_zh: Optional[str] = None
+    title_hi: Optional[str] = None
+
+class SDGTargetCreate(SDGTargetBase):
+    pass
+
+class SDGTarget(SDGTargetBase):
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class SDGIndicatorBase(BaseModel):
+    indicator_id: str
+    target_id: str
+    title_en: str
+    title_de: Optional[str] = None
+    title_fr: Optional[str] = None
+    title_es: Optional[str] = None
+    title_zh: Optional[str] = None
+    title_hi: Optional[str] = None
+
+class SDGIndicator(SDGIndicatorBase):
+    created_at: datetime
+    
+class Config:
+    from_attributes = True
+
+
