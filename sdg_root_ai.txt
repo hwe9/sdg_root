@@ -1,35 +1,7 @@
-networks:
-  sdg_network:
-    driver: bridge
+/sdg_root is the source-folder of the project: we are 17
 
+- docker-compose.yml
 services:
-
-  auth_service:
-    build: 
-      context: ${SRC_ROOT}/auth
-      dockerfile: Dockerfile
-    container_name: auth_service
-    ports:
-      - "8005:8005"
-    volumes:
-      - ${SRC_ROOT}/auth:/app
-    environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=${DATABASE_URL}
-    networks:
-      - sdg_network
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: '512M'
-
   api_service:
     build: ${SRC_ROOT}/api
     container_name: api_service
@@ -276,5 +248,82 @@ services:
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
     
+    
+-- Dockerfile
+    
+    # Basierend auf dem offiziellen Transformer-Inference-Image
+FROM cr.weaviate.io/semitechnologies/transformers-inference:sentence-transformers-multi-qa-MiniLM-L6-cos-v1
+
+# Temporär als root, um Pakete zu installieren (bei Minimal-Images oft Standard)
+USER root
+
+# Installiere Debug- und Diagnose-Tools
+# Für Debian/Ubuntu-Basis (bei den meisten KI-Images Standard)
+RUN apt-get update && apt-get install -y wget curl
+
+# Optional: weitere Tools für wissenschaftliches Debuggen
+# RUN apt-get install -y procps net-tools
+
+# (Falls benötigt:) Wechsle zurück zum originalen Nutzer, der App ausführt
+# In Weaviate-Images ist meist root default, dann kann die Zeile entfallen
+# USER hwe
+
+# Keine CMD nötig – wird vom Baseimage geerbt
+
+-- requirements.txt
+
+fastapi
+uvicorn[standard]
+python-dotenv
   
+
+-- .env
+# roots
+DATA_ROOT=/mnt/gigabyte1tb/SDG/sdg_root/data
+SRC_ROOT=./src
+
+# Database Configuration
+POSTGRES_USER=sdg_service
+POSTGRES_PASSWORD=g^RB}?%zlNQ$[&Rz'%_P!'Y7EtC!!yD
+POSTGRES_DB=sdg_pipeline
+DATABASE_URL=postgresql://sdg_service:g^RB}?%zlNQ$[&Rz'%_P!'Y7EtC!!yD@database_service:5432/sdg_pipeline
+DATABASE_SERVICE_VOLUMES=/mnt/gigabyte1tb/SDG/sdg_root/data/postgres_data:/var/lib/postgresql/data
+
+# pgadmin: Additional settings
+PGADMIN_DEFAULT_EMAIL=heinrich.ekam@gmail.com
+PGADMIN_VOLUMES=/mnt/gigabyte1tb/SDG/sdg_root/data/pgadmin_data:/var/lib/pgadmin
+
+# weaviate: additional settings
+WEAVIATE_SERVICE_VOLUMES=/mnt/gigabyte1tb/SDG/sdg_root/data/weaviate_data:/var/lib/weaviate
+WEAVIATE_URL=http://weaviate_service:8080
+WEAVIATE_API_KEY=
+WEAVIATE_IMAGE=semitechnologies/transformers-inference:sentence-transformers-multi-qa-MiniLM-L6-cos-v1
+
+OPENAI_API_KEY=
+
+REDIS_URL=redis://localhost:6379
+
+API_SERVICE_URL=http://localhost:8000
+DATA_PROCESSING_URL=http://localhost:8001  
+DATA_RETRIEVAL_URL=http://localhost:8002
+VECTORIZATION_SERVICE_URL=http://localhost:8003
+
+LOG_LEVEL=INFO
+DEBUG=false
+ENVIRONMENT=development
+
+SUPPORTED_REGIONS=EU,China,India,USA,ASEAN,BRICS
+SUPPORTED_LANGUAGES=en,de,fr,es,zh,hi
+
+SDG_CLASSIFICATION_CONFIDENCE_THRESHOLD=0.7
+MAX_SDGS_PER_ARTICLE=5
+ENABLE_INTERLINKAGE_ANALYSIS=true
+
+MAX_WORKERS=4
+BATCH_SIZE=100
+CACHE_TTL=3600
+
+SECRET_KEY=your_secret_key_here
+API_KEY_EXPIRY_DAYS=30
+RATE_LIMIT_PER_MINUTE=60
 
