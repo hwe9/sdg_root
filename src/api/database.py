@@ -2,26 +2,39 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from .core.secrets_manager import secrets_manager
+
 import logging
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
 
-if not DATABASE_URL:
-    # Fallback for development
-    DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/sdg_pipeline"
-    logger.warning("DATABASE_URL not set, using default development database")
+def get_database_url():
+    """Get database URL with encrypted credentials"""
+    try:
+        db_host = os.environ.get("DB_HOST", "database_service")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = secrets_manager.get_secret("POSTGRES_DB")
+        db_user = secrets_manager.get_secret("POSTGRES_USER")
+        db_password = secrets_manager.get_secret("POSTGRES_PASSWORD")
+        
+        return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    except Exception as e:
+        logger.error(f"Error constructing database URL: {e}")
+        raise
 
-def get_db_url():
-    """Get database URL for external usage"""
-    return DATABASE_URL
+DATABASE_URL = get_database_url()
 
+# Add connection security settings
 engine_kwargs = {
     "pool_pre_ping": True,
     "pool_recycle": 300,
     "pool_size": 10,
-    "max_overflow": 20
+    "max_overflow": 20,
+    "connect_args": {
+        "sslmode": "require",  # Require SSL
+        "options": "-c default_transaction_isolation=serializable"
+    }
 }
 
 if DATABASE_URL.startswith("sqlite"):

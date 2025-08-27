@@ -1,44 +1,69 @@
 networks:
-  sdg_network:
+  sdg_internal:
+    driver: bridge
+    internal: true 
+  sdg_external:
     driver: bridge
 
 services:
 
-  auth_service:
-    build: 
-      context: ${SRC_ROOT}/auth
-      dockerfile: Dockerfile
-    container_name: auth_service
+  nginx_proxy:
+    image: nginx:alpine
+    container_name: nginx_proxy
     ports:
-      - "8005:8005"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ${SRC_ROOT}/auth:/app
-    environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=${DATABASE_URL}
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/ssl/certs:ro
     networks:
-      - sdg_network
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: '512M'
+      - sdg_external
+      - sdg_internal
+    depends_on:
+      - auth_service
+      - api_service
+
+  auth_service:
+  build: 
+    context: ${SRC_ROOT}/auth
+    dockerfile: Dockerfile
+  container_name: auth_service
+  expose:
+      - "8005"
+  volumes:
+      - ${SRC_ROOT}/auth:/app
+  environment:
+      - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
+      - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+  networks:
+    - sdg_internal
+  depends_on:
+    database_service:
+      condition: service_healthy
+  command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+  deploy:
+    resources:
+      limits:
+        cpus: '0.5'
+        memory: '512M'
 
   api_service:
     build: ${SRC_ROOT}/api
     container_name: api_service
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - ${SRC_ROOT}/api:/app
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
+    networks:
+      - sdg_internal
     depends_on:
       database_service:
         condition: service_healthy

@@ -9,6 +9,7 @@ from datetime import datetime
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError
 from urllib.parse import quote
+from ..core.url_validator import url_validator
 import logging
 logging.basicConfig(level=logging.INFO)
 
@@ -18,6 +19,16 @@ class RetrievalWorker:
         self.data_dir = data_dir
         self.processed_file = processed_file
         self.downloaded_urls_file = os.path.join(data_dir, "downloaded_urls.csv")
+
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'SDG-Pipeline-Bot/1.0 (+https://sdg-pipeline.org/bot)'
+        })
+        
+        # Security settings
+        self.session.max_redirects = 3
+        self.timeout = 15
+        self.max_file_size = 50 * 1024 * 1024  # 50MB limit
 
         print("---retrievalWorker instanz gestartet")
     
@@ -121,32 +132,105 @@ class RetrievalWorker:
             print(f"Error: {e}")
             return None
 
-    def download_generic_content(self, url):
-        logging.info(f"Starte Download: {url}")
+    def download_generic_content(self, url: str):
+        """Download content with comprehensive security validation"""
+        logging.info(f"Validating URL: {url}")
+        
+        # Validate URL first
+        is_valid, error_msg = url_validator.validate_url(url)
+        if not is_valid:
+            logging.error(f"URL validation failed for {url}: {error_msg}")
+            return None
+        
         try:
             os.makedirs(self.data_dir, exist_ok=True)
             
-            response = requests.get(url, timeout=15)
+            # Make request with security headers
+            response = self.session.get(
+                url, 
+                timeout=self.timeout,
+                allow_redirects=True,
+                stream=True,  # Stream for size checking
+                headers={
+                    'Accept': 'application/pdf,text/html,application/xml,text/plain',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'close'
+                }
+            )
             response.raise_for_status()
-            filename = os.path.basename(url)
-            if not filename or '.' not in filename:
-                filename = f"download_{abs(hash(url))}.pdf"
+            
+            # Check content type
+            content_type = response.headers.get('content-type', '').lower()
+            allowed_types = ['application/pdf', 'text/html', 'text/plain', 'application/xml']
+            if not any(allowed_type in content_type for allowed_type in allowed_types):
+                logging.error(f"Disallowed content type: {content_type}")
+                return None
+            
+            # Check file size
+            content_length = response.headers.get('content-length')
+            if content_length and int(content_length) > self.max_file_size:
+                logging.error(f"File too large: {content_length} bytes")
+                return None
+            
+            # Download with size limit
+            filename = self._generate_safe_filename(url)
             file_path = os.path.join(self.data_dir, filename)
+            
+            downloaded_size = 0
             with open(file_path, "wb") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                f.write(response.content)
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        downloaded_size += len(chunk)
+                        if downloaded_size > self.max_file_size:
+                            f.close()
+                            os.remove(file_path)
+                            logging.error(f"File size exceeded limit during download")
+                            return None
+                        f.write(chunk)
+            
             file_size = os.path.getsize(file_path)
-            logging.info(f"✅ Download erfolgreich: {filename} ({file_size} Bytes)")
+            logging.info(f"✅ Download successful: {filename} ({file_size} bytes)")
+            
             return {
                 "url": url,
                 "title": filename,
                 "file_path": file_path,
-                "source_url": url
+                "source_url": url,
+                "content_type": content_type,
+                "file_size": file_size
             }
-        except Exception as e:
-            logging.error(f"Download-Fehler bei {url}: {e}")
-            print(f"Error: {e}")
+            
+        except requests.exceptions.Timeout:
+            logging.error(f"Timeout downloading {url}")
             return None
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error downloading {url}: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"Unexpected error downloading {url}: {e}")
+            return None
+    
+    def _generate_safe_filename(self, url: str) -> str:
+        """Generate safe filename from URL"""
+        import hashlib
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(url)
+        path_part = parsed.path.split('/')[-1] if parsed.path else 'download'
+        
+        # Sanitize filename
+        safe_chars = '-_.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        safe_filename = ''.join(c for c in path_part if c in safe_chars)
+        
+        if not safe_filename or len(safe_filename) < 3:
+            # Generate filename from URL hash
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            safe_filename = f"download_{url_hash}"
+        
+        # Add extension if missing
+        if '.' not in safe_filename:
+            safe_filename += '.pdf'  # Default extension
+        
 
     def save_to_file(self, data):
         with open(self.processed_file, "w", encoding="utf-8") as f:

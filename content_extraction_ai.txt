@@ -2,24 +2,38 @@
 
 -- Dockerfile
 
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-sqlalchemy[asyncio]
-psycopg2-binaryfastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-dotenv==1.0.0
-pydantic==2.5.0
-sqlalchemy[asyncio]==2.0.23
-psycopg2-binary==2.9.7
-alembic==1.13.1
-redis==5.0.1
-celery==5.3.4
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-dateutil==2.8.2
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    libxml2-dev \
+    libxslt-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN useradd -m -u 1000 contentuser && chown -R contentuser:contentuser /app
+USER contentuser
+
+# Expose port
+EXPOSE 8004
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8004/health || exit 1
+
+# Run the application
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]
 
 -- requirements.txt
 
@@ -433,6 +447,7 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
     
 /sdg_root/src/content_extraction/extractors
 
@@ -618,6 +633,7 @@ class BaseExtractor(ABC):
                 extracted_content.extend(result)
         
         return extracted_content
+
         
 --- chatgpt_extractor.py
 

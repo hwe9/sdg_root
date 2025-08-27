@@ -221,3 +221,4 @@ class RetrievalWorker:
 
     def handle_errors(self, url, error):
         print(f"Fehler bei {url}: {error}")
+

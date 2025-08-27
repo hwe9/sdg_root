@@ -13,10 +13,10 @@ import re
 import datetime
 import logging
 
-from .core.db_utils import save_to_database
-from .core.file_extraction import FileHandler
-from .core.processing_logic import ProcessingLogic
-from .core.api_client import ApiClient
+from core.db_utils import save_to_database
+from core.file_extraction import FileHandler
+from core.processing_logic import ProcessingLogic
+from core.api_client import ApiClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

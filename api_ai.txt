@@ -198,6 +198,65 @@ async def get_article_summary(
     
     if not chunks:
         raise HTTPException(status_code=404, detail="No chunks found for article")
+    
+    # Generate summary from chunks
+    summary_text = " ".join([chunk.text[:200] + "..." for chunk in chunks])
+    
+    # Extract SDG information
+    sdg_sections = list(set([chunk.sdg_section for chunk in chunks if chunk.sdg_section]))
+    
+    return {
+        "article_id": article_id,
+        "article_title": article.title,
+        "summary": summary_text,
+        "sdg_sections": sdg_sections,
+        "chunk_count": len(chunks),
+        "generated_at": "2025-08-22T15:29:00Z"
+    }
+
+@app.post("/images/", response_model=schemas.ImageBase)
+def create_image(image: schemas.ImageBase, db: Session = Depends(get_db)):
+    db_image = models.Image(**image.dict())
+    db.add(db_image)
+    db.commit()
+    db.refresh(db_image)
+    return db_image
+
+@app.get("/images/{article_id}", response_model=List[schemas.ImageBase])
+def get_images(article_id: int, db: Session = Depends(get_db)):
+    images = db.query(models.Image).filter(models.Image.article_id == article_id).all()
+    return images
+
+# --- CRUD Endpunkte für SDGs ---
+
+@app.post("/sdgs/", response_model=schemas.Sdg)
+def create_sdg(sdg: schemas.SdgCreate, db: Session = Depends(get_db)):
+    db_sdg = models.Sdg(**sdg.dict())
+    db.add(db_sdg)
+    db.commit()
+    db.refresh(db_sdg)
+    return db_sdg
+
+@app.get("/sdgs/", response_model=List[schemas.Sdg])
+def read_sdgs(db: Session = Depends(get_db)):
+    sdgs = db.query(models.Sdg).all()
+    return sdgs
+
+# --- CRUD Endpunkte für Actors ---
+
+@app.post("/actors/", response_model=schemas.Actor)
+def create_actor(actor: schemas.ActorCreate, db: Session = Depends(get_db)):
+    db_actor = models.Actor(**actor.dict())
+    db.add(db_actor)
+    db.commit()
+    db.refresh(db_actor)
+    return db_actor
+
+@app.get("/actors/", response_model=List[schemas.Actor])
+def read_actors(db: Session = Depends(get_db)):
+    actors = db.query(models.Actor).all()
+    return actors
+
         
 -- migrate_existing_schema.py
 
@@ -432,64 +491,7 @@ def migrate_existing_schema():
 
 if __name__ == "__main__":
     migrate_existing_schema()
-    
-    # Generate summary from chunks
-    summary_text = " ".join([chunk.text[:200] + "..." for chunk in chunks])
-    
-    # Extract SDG information
-    sdg_sections = list(set([chunk.sdg_section for chunk in chunks if chunk.sdg_section]))
-    
-    return {
-        "article_id": article_id,
-        "article_title": article.title,
-        "summary": summary_text,
-        "sdg_sections": sdg_sections,
-        "chunk_count": len(chunks),
-        "generated_at": "2025-08-22T15:29:00Z"
-    }
 
-@app.post("/images/", response_model=schemas.ImageBase)
-def create_image(image: schemas.ImageBase, db: Session = Depends(get_db)):
-    db_image = models.Image(**image.dict())
-    db.add(db_image)
-    db.commit()
-    db.refresh(db_image)
-    return db_image
-
-@app.get("/images/{article_id}", response_model=List[schemas.ImageBase])
-def get_images(article_id: int, db: Session = Depends(get_db)):
-    images = db.query(models.Image).filter(models.Image.article_id == article_id).all()
-    return images
-
-# --- CRUD Endpunkte für SDGs ---
-
-@app.post("/sdgs/", response_model=schemas.Sdg)
-def create_sdg(sdg: schemas.SdgCreate, db: Session = Depends(get_db)):
-    db_sdg = models.Sdg(**sdg.dict())
-    db.add(db_sdg)
-    db.commit()
-    db.refresh(db_sdg)
-    return db_sdg
-
-@app.get("/sdgs/", response_model=List[schemas.Sdg])
-def read_sdgs(db: Session = Depends(get_db)):
-    sdgs = db.query(models.Sdg).all()
-    return sdgs
-
-# --- CRUD Endpunkte für Actors ---
-
-@app.post("/actors/", response_model=schemas.Actor)
-def create_actor(actor: schemas.ActorCreate, db: Session = Depends(get_db)):
-    db_actor = models.Actor(**actor.dict())
-    db.add(db_actor)
-    db.commit()
-    db.refresh(db_actor)
-    return db_actor
-
-@app.get("/actors/", response_model=List[schemas.Actor])
-def read_actors(db: Session = Depends(get_db)):
-    actors = db.query(models.Actor).all()
-    return actors
 
 -- models.py
 
@@ -777,7 +779,7 @@ Index('idx_progress_actor_sdg_year', SdgProgress.actor_id, SdgProgress.sdg_id, S
 Base.metadata.create_all(bind=engine)
 
 
--- sschemas.py
+-- schemas.py
 
 from pydantic import BaseModel
 from datetime import datetime
@@ -956,6 +958,8 @@ class SDGIndicator(SDGIndicatorBase):
     
 class Config:
     from_attributes = True
+
+
 
 -- requirement.txt
 

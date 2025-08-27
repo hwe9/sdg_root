@@ -8,7 +8,7 @@ class SDGTextChunker:
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.model = SentenceTransformer(model_name)
-        
+    
     def smart_chunk_by_sentences(self, text: str) -> List[Dict[str, Any]]:
         """
         Intelligently chunks text by sentences while respecting size limits.
@@ -52,35 +52,51 @@ class SDGTextChunker:
             
         return chunks
     
+    # def chunk_by_sdg_sections(self, text: str) -> List[Dict[str, Any]]:
+    #     """
+    #     Chunks text by SDG-specific sections and topics.
+    #     Uses your existing SDG keywords for intelligent sectioning.
+    #     """
+    #     from .keywords import sdg_keywords_dict
+        
+    #     chunks = []
+    #     sections = self._identify_sdg_sections(text, sdg_keywords_dict)
+        
+    #     for section_name, section_text in sections.items():
+    #         if len(section_text) > self.chunk_size:
+    #             # Further chunk large sections
+    #             sub_chunks = self.smart_chunk_by_sentences(section_text)
+    #             for i, sub_chunk in enumerate(sub_chunks):
+    #                 sub_chunk.update({
+    #                     "sdg_section": section_name,
+    #                     "sub_section_id": i
+    #                 })
+    #                 chunks.append(sub_chunk)
+    #         else:
+    #             chunks.append({
+    #                 "chunk_id": len(chunks),
+    #                 "text": section_text,
+    #                 "length": len(section_text),
+    #                 "sdg_section": section_name,
+    #                 "embedding": None
+    #             })
+        
+    #     return chunks
+
     def chunk_by_sdg_sections(self, text: str) -> List[Dict[str, Any]]:
-        """
-        Chunks text by SDG-specific sections and topics.
-        Uses your existing SDG keywords for intelligent sectioning.
-        """
-        from .keywords import sdg_keywords_dict
-        
+        """Split text into chunks based on SDG-related sections"""
         chunks = []
-        sections = self._identify_sdg_sections(text, sdg_keywords_dict)
+        words = text.split()
         
-        for section_name, section_text in sections.items():
-            if len(section_text) > self.chunk_size:
-                # Further chunk large sections
-                sub_chunks = self.smart_chunk_by_sentences(section_text)
-                for i, sub_chunk in enumerate(sub_chunks):
-                    sub_chunk.update({
-                        "sdg_section": section_name,
-                        "sub_section_id": i
-                    })
-                    chunks.append(sub_chunk)
-            else:
-                chunks.append({
-                    "chunk_id": len(chunks),
-                    "text": section_text,
-                    "length": len(section_text),
-                    "sdg_section": section_name,
-                    "embedding": None
-                })
-        
+        for i in range(0, len(words), self.chunk_size - self.overlap):
+            chunk_text = ' '.join(words[i:i + self.chunk_size])
+            chunks.append({
+                "text": chunk_text,
+                "chunk_id": i // (self.chunk_size - self.overlap),
+                "start_word": i,
+                "end_word": min(i + self.chunk_size, len(words))
+            })
+            
         return chunks
     
     def generate_embeddings_for_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
