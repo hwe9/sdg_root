@@ -5,7 +5,12 @@ import weaviate
 from sqlalchemy import create_engine, text, MetaData, Table
 from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
 from typing import Dict, Any, List, Optional, Union
+try:
+    from .secrets_manager import secrets_manager
+except ImportError:
+    from ..core.secrets_manager import secrets_manager
 import logging
 from datetime import datetime
 import hashlib
@@ -17,16 +22,63 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
 
 def get_database_engine():
-    """Create and return SQLAlchemy engine with connection pooling"""
+    """Create robust database engine with connection pooling"""
     engine_kwargs = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
         "pool_size": 10,
         "max_overflow": 20,
-        "echo": False  # Set to True for SQL debugging
+        "echo": False,
+        "poolclass": QueuePool,
+        "connect_args": {
+            "connect_timeout": 30,
+            "application_name": "SDG_Pipeline"
+        }
     }
     
-    return create_engine(DATABASE_URL, **engine_kwargs)
+    engine = create_engine(DATABASE_URL, **engine_kwargs)
+    
+    # Test connection
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("Database connection established successfully")
+            break
+        except (OperationalError, DisconnectionError) as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database connection attempt {attempt + 1} failed: {e}")
+                time.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                logger.error(f"Failed to establish database connection after {max_retries} attempts")
+                raise
+    
+    return engine
+
+
+@contextmanager
+def get_db_connection():
+    """Context manager for database connections with automatic retry"""
+    engine = get_database_engine()
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            with engine.begin() as connection:
+                yield connection
+                break
+        except (OperationalError, DisconnectionError) as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database operation attempt {attempt + 1} failed: {e}")
+                time.sleep(1)
+            else:
+                logger.error("Database operation failed after retries")
+                raise
+        except Exception as e:
+            logger.error(f"Unexpected database error: {e}")
+            raise
+
 
 def get_weaviate_client():
     """Create and return Weaviate client instance"""
@@ -92,11 +144,11 @@ def save_to_database(
     chunks_data: Optional[List[Dict]] = None
 ):
     
-    engine = get_database_engine()
+    
     article_id = None
     
     try:
-        with engine.begin() as connection:
+        with get_db_connection() as connection:
             
             article_id = _insert_article(connection, metadata, text_content)
             
@@ -111,8 +163,12 @@ def save_to_database(
             
             logger.info(f"✅ Article {article_id} saved to PostgreSQL successfully")
             
-        _save_to_weaviate(article_id, text_content, embeddings, chunks_data, metadata)
-        
+        try:
+            _save_to_weaviate(article_id, text_content, embeddings, chunks_data, metadata)
+        except Exception as e:
+            logger.error(f"Weaviate save failed for article {article_id}: {e}")
+            # Don't fail the entire operation for Weaviate errors
+            
         return article_id
         
     except Exception as e:

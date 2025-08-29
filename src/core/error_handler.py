@@ -1,0 +1,132 @@
+import logging
+import traceback
+import sys
+from typing import Any, Dict, Optional, Type
+from functools import wraps
+from datetime import datetime
+import asyncio
+
+logger = logging.getLogger(__name__)
+
+class SDGPipelineError(Exception):
+    """Base exception for SDG Pipeline"""
+    def __init__(self, message: str, error_code: str = None, context: Dict = None):
+        self.message = message
+        self.error_code = error_code or self.__class__.__name__
+        self.context = context or {}
+        self.timestamp = datetime.utcnow()
+        super().__init__(self.message)
+
+class DatabaseError(SDGPipelineError):
+    """Database operation errors"""
+    pass
+
+class ExtractionError(SDGPipelineError):
+    """Content extraction errors"""
+    pass
+
+class VectorizationError(SDGPipelineError):
+    """Vector database errors"""
+    pass
+
+def handle_errors(error_types: tuple = (Exception,), 
+                 fallback_return: Any = None,
+                 log_level: str = "error"):
+    """Decorator for comprehensive error handling"""
+    def decorator(func):
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except error_types as e:
+                error_info = {
+                    "function": func.__name__,
+                    "args": str(args)[:200],
+                    "kwargs": str(kwargs)[:200],
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "traceback": traceback.format_exc()
+                }
+                
+                getattr(logger, log_level)(f"Error in {func.__name__}: {e}", extra=error_info)
+                
+                if isinstance(e, SDGPipelineError):
+                    raise  # Re-raise custom errors
+                
+                return fallback_return
+            except Exception as e:
+                logger.critical(f"Unexpected error in {func.__name__}: {e}", 
+                              extra={"traceback": traceback.format_exc()})
+                raise
+        
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except error_types as e:
+                error_info = {
+                    "function": func.__name__,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)
+                }
+                getattr(logger, log_level)(f"Error in {func.__name__}: {e}", extra=error_info)
+                return fallback_return
+            except Exception as e:
+                logger.critical(f"Unexpected error in {func.__name__}: {e}")
+                raise
+        
+        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+    return decorator
+
+class ErrorRecoveryManager:
+    """Manages error recovery strategies"""
+    
+    def __init__(self):
+        self.retry_strategies = {}
+        
+    def register_retry_strategy(self, error_type: Type[Exception], 
+                              max_retries: int = 3, 
+                              delay: float = 1.0,
+                              backoff: float = 2.0):
+        """Register retry strategy for specific error types"""
+        self.retry_strategies[error_type] = {
+            "max_retries": max_retries,
+            "delay": delay,
+            "backoff": backoff
+        }
+    
+    async def execute_with_retry(self, func, *args, **kwargs):
+        """Execute function with retry logic"""
+        last_exception = None
+        
+        for error_type, strategy in self.retry_strategies.items():
+            max_retries = strategy["max_retries"]
+            delay = strategy["delay"]
+            backoff = strategy["backoff"]
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    if asyncio.iscoroutinefunction(func):
+                        return await func(*args, **kwargs)
+                    else:
+                        return func(*args, **kwargs)
+                except error_type as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        wait_time = delay * (backoff ** attempt)
+                        logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"All {max_retries + 1} attempts failed")
+                        break
+        
+        if last_exception:
+            raise last_exception
+
+# Global error recovery manager
+error_manager = ErrorRecoveryManager()
+
+# Register common retry strategies
+error_manager.register_retry_strategy(DatabaseError, max_retries=3, delay=2.0)
+error_manager.register_retry_strategy(ExtractionError, max_retries=2, delay=5.0)
+error_manager.register_retry_strategy(VectorizationError, max_retries=2, delay=3.0)

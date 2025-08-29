@@ -4,7 +4,10 @@ import re
 from typing import Dict, Any, List
 from .text_chunker import SDGTextChunker
 from .keywords import sdg_keywords_dict, ai_keywords_dict
-from deep_translator import GoogleTranslator
+try:
+    from deep_translator import GoogleTranslator
+except ImportError:
+    GoogleTranslator = None
 import pytesseract
 from PIL import Image
 import logging

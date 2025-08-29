@@ -80,38 +80,30 @@ class VectorDBClient:
             raise
     
     def _setup_sdg_schema(self):
-        """Setup SDG-specific Weaviate schema"""
+    
         try:
-            # Define SDG Article class schema
+            # Verbesserte SDG Article Schema mit Validation
             sdg_article_schema = {
                 "class": "SDGArticle",
                 "description": "SDG-related articles and documents",
-                "vectorizer": "none",  # We'll provide our own vectors
+                "vectorizer": "none",
                 "properties": [
                     {
                         "name": "title",
                         "dataType": ["text"],
-                        "description": "Article title"
+                        "description": "Article title",
+                        "tokenization": "word"
                     },
                     {
                         "name": "content",
                         "dataType": ["text"],
-                        "description": "Full article content"
-                    },
-                    {
-                        "name": "summary",
-                        "dataType": ["text"],
-                        "description": "Article summary"
+                        "description": "Full article content",
+                        "tokenization": "word"
                     },
                     {
                         "name": "sdg_goals",
                         "dataType": ["int[]"],
                         "description": "Related SDG goals (1-17)"
-                    },
-                    {
-                        "name": "sdg_targets",
-                        "dataType": ["text[]"],
-                        "description": "Related SDG targets"
                     },
                     {
                         "name": "region",
@@ -124,35 +116,44 @@ class VectorDBClient:
                         "description": "Content language"
                     },
                     {
-                        "name": "publication_date",
-                        "dataType": ["date"],
-                        "description": "Publication date"
-                    },
-                    {
-                        "name": "source_url",
-                        "dataType": ["text"],
-                        "description": "Source URL"
-                    },
-                    {
                         "name": "confidence_score",
                         "dataType": ["number"],
-                        "description": "SDG classification confidence"
+                        "description": "SDG classification confidence",
+                        "indexFilterable": True,
+                        "indexSearchable": False
                     }
                 ]
             }
             
-            # Create schema if it doesn't exist
-            if not self.client.schema.exists("SDGArticle"):
+            # Schema nur erstellen wenn es nicht existiert
+            try:
+                existing_schema = self.client.schema.get("SDGArticle")
+                logger.info("SDGArticle schema already exists")
+            except weaviate.exceptions.UnexpectedStatusCodeException:
                 self.client.schema.create_class(sdg_article_schema)
-                logger.info("Created SDGArticle schema")
-            
-            # Additional schemas for other SDG entities
-            self._create_additional_schemas()
-            
+                logger.info("Created new SDGArticle schema")
+                
         except Exception as e:
             logger.error(f"Error setting up SDG schema: {e}")
-            raise
-    
+            # Fallback: Verwende Standard-Schema
+            self._create_fallback_schema()
+
+    def _create_fallback_schema(self):
+        simple_schema = {
+            "class": "SDGArticle",
+            "vectorizer": "none",
+            "properties": [
+                {"name": "title", "dataType": ["text"]},
+                {"name": "content", "dataType": ["text"]},
+                {"name": "sdg_goals", "dataType": ["int[]"]}
+            ]
+        }
+        try:
+            self.client.schema.create_class(simple_schema)
+            logger.info("Created fallback SDGArticle schema")
+        except Exception as e:
+            logger.error(f"Failed to create fallback schema: {e}")
+        
     def _create_additional_schemas(self):
         """Create additional SDG-related schemas"""
         schemas = [

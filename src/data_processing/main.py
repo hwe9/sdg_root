@@ -1,20 +1,17 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import time
 import json
-import psycopg2
 from sqlalchemy import create_engine, text
 from sentence_transformers import SentenceTransformer
 from faster_whisper import WhisperModel
-from sqlalchemy.exc import OperationalError
-import PyPDF2
-from docx import Document
-import csv
 import re
-import datetime
 import logging
+from typing import Dict, Any
 
 from core.db_utils import save_to_database
-from core.file_extraction import FileHandler
+from core.file_handler import FileHandler
 from core.processing_logic import ProcessingLogic
 from core.api_client import ApiClient
 
@@ -25,7 +22,6 @@ RAW_DATA_DIR = "/app/raw_data"
 PROCESSED_DATA_DIR = "/app/processed_data"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 IMAGES_DIR = "/app/images"
-
 CLEANUP_INTERVAL_DAYS = 7 
 last_cleanup_timestamp = 0
 
@@ -45,6 +41,17 @@ file_handler = FileHandler(IMAGES_DIR)
 processing_logic = ProcessingLogic(whisper_model, sentence_model)
 api_client = ApiClient()
 
+def check_database_health():
+    """Simple database health check"""
+    try:
+        engine = create_engine(DATABASE_URL)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        return False
+
 def run_processing_worker():
     """Monitor RAW_DATA_DIR for new files and process them."""
     logger.info("Starting Data Processing Service...")
@@ -56,6 +63,12 @@ def run_processing_worker():
             if (current_time - last_cleanup_timestamp) > (CLEANUP_INTERVAL_DAYS * 24 * 3600):
                 file_handler.cleanup_processed_data(PROCESSED_DATA_DIR, CLEANUP_INTERVAL_DAYS)
                 last_cleanup_timestamp = current_time
+
+            # Simple health check
+            if not check_database_health():
+                logger.warning("Database not available, waiting...")
+                time.sleep(30)
+                continue
                 
             json_files = [f for f in os.listdir(RAW_DATA_DIR) if f.endswith('.json')]
             if not json_files:
@@ -111,36 +124,6 @@ def run_processing_worker():
         except Exception as e:
             logger.error(f"Unexpected error in processing worker: {e}")
             time.sleep(60)
-
-def process_text_with_chunking(self, text_content: str) -> Dict[str, Any]:
-    """Process text with intelligent chunking for large documents"""
-    
-    if len(text_content) <= 512:
-        return self._process_single_chunk(text_content)
-    
-    chunks = self.text_chunker.chunk_by_sdg_sections(text_content)
-    chunks = self.text_chunker.generate_embeddings_for_chunks(chunks)
-    
-    processed_chunks = []
-    all_tags = set()
-    
-    for chunk in chunks:
-        chunk_data = self._process_single_chunk(chunk["text"])
-        chunk.update({
-            "sdg_tags": chunk_data["tags"],
-            "keywords": chunk_data.get("keywords", []),
-            "confidence_score": chunk_data.get("confidence_score", 0.0)
-        })
-        processed_chunks.append(chunk)
-        all_tags.update(chunk_data["tags"])
-    
-    return {
-        "chunks": processed_chunks,
-        "combined_tags": list(all_tags),
-        "total_chunks": len(processed_chunks),
-        "embeddings": [chunk["embedding"] for chunk in processed_chunks]
-    }
-
 
 def extract_api_metadata(source_url: str, api_client: ApiClient) -> dict:
     """Extract metadata from various APIs based on URL patterns."""

@@ -2,10 +2,14 @@
 Content Extraction Service - FastAPI Application
 Handles extraction from multiple sources: Gemini, web pages, newsletters, RSS feeds
 """
+import os
+import sys
 import logging
 from typing import List, Dict, Any, Optional
 import asyncio
 from datetime import datetime
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,10 +17,23 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, HttpUrl
 import httpx
 
-from extractors.gemini_extractor import GeminiExtractor
-from extractors.web_extractor import WebExtractor
-from extractors.newsletter_extractor import NewsletterExtractor
-from extractors.rss_extractor import RSSExtractor
+try:
+    from extractors.gemini_extractor import GeminiExtractor
+    from extractors.web_extractor import WebExtractor
+    from extractors.newsletter_extractor import NewsletterExtractor
+    from extractors.rss_extractor import RSSExtractor
+
+except ImportError as e:
+    logging.error(f"failed to import ectractors: {e}")
+
+    class DummyExtractor:
+        def __init__(self, config): pass
+        async def extract(self, *args, **kwargs): return []
+    
+    GeminiExtractor = DummyExtractor
+    WebExtractor = DummyExtractor
+    NewsletterExtractor = DummyExtractor
+    RSSExtractor = DummyExtractor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,9 +42,51 @@ logger = logging.getLogger(__name__)
 # Pydantic models
 class ExtractionRequest(BaseModel):
     url: HttpUrl = Field(..., description="Source URL to extract content from")
-    source_type: Optional[str] = Field(None, description="Source type hint: web, rss, newsletter, gemini")
+    source_type: Optional[str] = Field(None, description="Source type hint")
     language: Optional[str] = Field("en", description="Expected content language")
     region: Optional[str] = Field(None, description="Expected content region")
+    
+    @validator('url')
+    def validate_url(cls, v):
+        # Enhanced URL validation
+        url_str = str(v)
+        
+        # Block dangerous protocols
+        dangerous_protocols = ['file://', 'ftp://', 'javascript:', 'data:']
+        if any(url_str.lower().startswith(proto) for proto in dangerous_protocols):
+            raise ValueError('Unsafe URL protocol')
+        
+        # Block localhost and private IPs
+        import re
+        if re.search(r'(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)', url_str):
+            raise ValueError('Local URLs not allowed')
+            
+        return v
+
+# Global extractors with error handling
+extractors = {}
+
+async def initialize_extractors():
+    """Initialize extraction services with error handling"""
+    config = {
+        "retry_attempts": 3,
+        "retry_delay": 1.0,
+        "timeout": 30,
+        "concurrent_requests": 5,
+        "user_agent": "SDG-Pipeline-ContentExtractor/1.0"
+    }
+    
+    try:
+        extractors['web'] = WebExtractor(config)
+        extractors['newsletter'] = NewsletterExtractor(config)
+        extractors['rss'] = RSSExtractor(config)
+        extractors['gemini'] = GeminiExtractor(config)
+        logger.info("Content extractors initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize extractors: {e}")
+        # Initialize with dummy extractors as fallback
+        for extractor_type in ['web', 'newsletter', 'rss', 'gemini']:
+            extractors[extractor_type] = DummyExtractor(config)
     
 class BatchExtractionRequest(BaseModel):
     urls: List[HttpUrl] = Field(..., description="List of URLs to extract", max_items=20)

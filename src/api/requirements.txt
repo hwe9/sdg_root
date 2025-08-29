@@ -1,8 +1,8 @@
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-sqlalchemy[asyncio]
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-dotenv==1.0.0
+pydantic>=2.8.0,<3.0.0
+sqlalchemy[asyncio]==2.0.23
 psycopg2-binaryfastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-dotenv==1.0.0
