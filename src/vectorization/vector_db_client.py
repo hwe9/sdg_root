@@ -42,7 +42,7 @@ class VectorDBClient:
         self._setup_sdg_schema()
     
     def _initialize_client(self):
-        """Initialize Weaviate client with configuration"""
+        """Initialize Weaviate client with configuration and URL validation"""
         try:
             if self.config.get("embedded", False):
                 # Embedded Weaviate for development
@@ -54,7 +54,13 @@ class VectorDBClient:
                     )
                 )
             else:
-                # Remote Weaviate instance
+                # Remote Weaviate instance mit URL-Validierung
+                weaviate_url = self.config.get("url", "http://localhost:8080")
+                
+                # URL-Validierung hinzufügen
+                if not weaviate_url.startswith(('http://', 'https://')):
+                    raise ValueError(f"Invalid Weaviate URL format: {weaviate_url}")
+                
                 auth_config = None
                 if self.config.get("api_key"):
                     auth_config = weaviate.AuthApiKey(api_key=self.config["api_key"])
@@ -64,81 +70,149 @@ class VectorDBClient:
                     headers["X-OpenAI-Api-Key"] = self.config["openai_api_key"]
                 
                 self.client = weaviate.Client(
-                    url=self.config.get("url", "http://localhost:8080"),
+                    url=weaviate_url,  # Validierte URL verwenden
                     auth_client_secret=auth_config,
                     additional_headers=headers
                 )
             
-            # Test connection
-            if self.client.is_ready():
-                logger.info("Weaviate client initialized successfully")
-            else:
-                raise ConnectionError("Weaviate client not ready")
+            # Test connection mit Retry-Logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if self.client.is_ready():
+                        logger.info(f"Weaviate client initialized successfully (attempt {attempt + 1})")
+                        break
+                    else:
+                        raise ConnectionError(f"Weaviate client not ready (attempt {attempt + 1})")
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Failed to establish Weaviate connection after {max_retries} attempts: {e}")
+                        raise
+                    else:
+                        logger.warning(f"Weaviate connection attempt {attempt + 1} failed: {e}")
+                        time.sleep(2 ** attempt)  # Exponential backoff
                 
         except Exception as e:
             logger.error(f"Error initializing Weaviate client: {e}")
             raise
     
     def _setup_sdg_schema(self):
-    
+        """Setup SDG schema with version compatibility check"""
         try:
-            # Verbesserte SDG Article Schema mit Validation
+            # Schema-Versions-Kompatibilität prüfen
+            current_version = "1.0"
+            
+            try:
+                existing_schema = self.client.schema.get("SDGArticle")
+                existing_version = existing_schema.get("version", "0.0")
+                
+                if existing_version != current_version:
+                    logger.warning(f"Schema version mismatch: {existing_version} != {current_version}")
+                    # Schema-Migration falls erforderlich
+                    self._migrate_schema(existing_version, current_version)
+                else:
+                    logger.info("SDGArticle schema already exists with correct version")
+                    return
+                    
+            except weaviate.exceptions.UnexpectedStatusCodeException:
+                # Schema existiert nicht, neu erstellen
+                pass
+            
+            # Verbesserte Schema-Definition
             sdg_article_schema = {
                 "class": "SDGArticle",
-                "description": "SDG-related articles and documents",
+                "description": "SDG-related articles and documents with full metadata",
                 "vectorizer": "none",
+                "version": current_version,
                 "properties": [
                     {
                         "name": "title",
                         "dataType": ["text"],
                         "description": "Article title",
-                        "tokenization": "word"
+                        "tokenization": "word",
+                        "indexFilterable": True
                     },
                     {
-                        "name": "content",
+                        "name": "content", 
                         "dataType": ["text"],
                         "description": "Full article content",
+                        "tokenization": "word",
+                        "indexSearchable": True
+                    },
+                    {
+                        "name": "summary",
+                        "dataType": ["text"], 
+                        "description": "Article summary",
                         "tokenization": "word"
                     },
                     {
                         "name": "sdg_goals",
                         "dataType": ["int[]"],
-                        "description": "Related SDG goals (1-17)"
+                        "description": "Related SDG goals (1-17)",
+                        "indexFilterable": True
                     },
                     {
                         "name": "region",
                         "dataType": ["text"],
-                        "description": "Geographic region"
+                        "description": "Geographic region",
+                        "indexFilterable": True
                     },
                     {
-                        "name": "language",
+                        "name": "language", 
                         "dataType": ["text"],
-                        "description": "Content language"
+                        "description": "Content language",
+                        "indexFilterable": True
                     },
                     {
                         "name": "confidence_score",
                         "dataType": ["number"],
-                        "description": "SDG classification confidence",
+                        "description": "SDG classification confidence (0.0-1.0)",
                         "indexFilterable": True,
                         "indexSearchable": False
+                    },
+                    {
+                        "name": "publication_date",
+                        "dataType": ["date"],
+                        "description": "Publication date",
+                        "indexFilterable": True
+                    },
+                    {
+                        "name": "source_url",
+                        "dataType": ["text"],
+                        "description": "Original source URL",
+                        "indexFilterable": False
                     }
                 ]
             }
             
-            # Schema nur erstellen wenn es nicht existiert
-            try:
-                existing_schema = self.client.schema.get("SDGArticle")
-                logger.info("SDGArticle schema already exists")
-            except weaviate.exceptions.UnexpectedStatusCodeException:
-                self.client.schema.create_class(sdg_article_schema)
-                logger.info("Created new SDGArticle schema")
-                
+            self.client.schema.create_class(sdg_article_schema)
+            logger.info("Created new SDGArticle schema with version validation")
+            
         except Exception as e:
             logger.error(f"Error setting up SDG schema: {e}")
-            # Fallback: Verwende Standard-Schema
             self._create_fallback_schema()
 
+    def _migrate_schema(self, old_version: str, new_version: str):
+        """Handle schema migration between versions"""
+        logger.info(f"Migrating schema from {old_version} to {new_version}")
+        
+        # Backup existing data
+        try:
+            backup_data = self.client.query.get("SDGArticle").do()
+            logger.info(f"Backed up {len(backup_data.get('data', {}).get('Get', {}).get('SDGArticle', []))} documents")
+        except Exception as e:
+            logger.error(f"Schema migration backup failed: {e}")
+            raise
+        
+        # Delete and recreate schema
+        try:
+            self.client.schema.delete_class("SDGArticle")
+            logger.info("Deleted old schema")
+        except Exception as e:
+            logger.warning(f"Could not delete old schema: {e}")
+
     def _create_fallback_schema(self):
+        """Create simple fallback schema"""
         simple_schema = {
             "class": "SDGArticle",
             "vectorizer": "none",
@@ -183,9 +257,12 @@ class VectorDBClient:
         ]
         
         for schema in schemas:
-            if not self.client.schema.exists(schema["class"]):
-                self.client.schema.create_class(schema)
-                logger.info(f"Created {schema['class']} schema")
+            try:
+                if not self.client.schema.exists(schema["class"]):
+                    self.client.schema.create_class(schema)
+                    logger.info(f"Created {schema['class']} schema")
+            except Exception as e:
+                logger.error(f"Failed to create {schema['class']} schema: {e}")
     
     async def insert_embeddings(self, 
                               documents: List[Dict[str, Any]], 
@@ -340,10 +417,14 @@ class VectorDBClient:
         try:
             stats = {}
             for class_name in self.sdg_classes:
-                if self.client.schema.exists(class_name):
-                    result = self.client.query.aggregate(class_name).with_meta_count().do()
-                    count = result.get("data", {}).get("Aggregate", {}).get(class_name, [{}])[0].get("meta", {}).get("count", 0)
-                    stats[class_name] = count
+                try:
+                    if self.client.schema.exists(class_name):
+                        result = self.client.query.aggregate(class_name).with_meta_count().do()
+                        count = result.get("data", {}).get("Aggregate", {}).get(class_name, [{}])[0].get("meta", {}).get("count", 0)
+                        stats[class_name] = count
+                except Exception as e:
+                    logger.warning(f"Could not get statistics for {class_name}: {e}")
+                    stats[class_name] = 0
             return stats
         except Exception as e:
             logger.error(f"Error getting statistics: {e}")

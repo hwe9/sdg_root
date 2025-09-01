@@ -6,7 +6,6 @@ networks:
     driver: bridge
 
 services:
-
   nginx_proxy:
     image: nginx:alpine
     container_name: nginx_proxy
@@ -24,34 +23,33 @@ services:
       - api_service
 
   auth_service:
-  build: 
-    context: ${SRC_ROOT}/auth
+    build: ${SRC_ROOT}/auth
     dockerfile: Dockerfile
-  container_name: auth_service
-  expose:
-      - "8005"
-  volumes:
-      - ${SRC_ROOT}/auth:/app
-  environment:
-      - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
-      - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
-  networks:
-    - sdg_internal
-  depends_on:
-    database_service:
-      condition: service_healthy
-  command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-  deploy:
-    resources:
-      limits:
-        cpus: '0.5'
-        memory: '512M'
+    container_name: auth_service
+    expose:
+        - "8005"
+    volumes:
+        - ${SRC_ROOT}/auth:/app
+    environment:
+        - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
+        - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
+        - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+    networks:
+      - sdg_internal
+    depends_on:
+      database_service:
+        condition: service_healthy
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '512M'
 
   api_service:
     build: ${SRC_ROOT}/api
@@ -170,7 +168,7 @@ services:
     depends_on:
       weaviate_service:
         condition: service_healthy
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
 
   
   data_retrieval_service:
@@ -183,6 +181,7 @@ services:
       - ${DATA_ROOT}/raw_data:/app/raw_data
       - ${DATA_ROOT}/quelle.txt:/app/quelle.txt
     environment:
+      - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL}
     depends_on:
       database_service:

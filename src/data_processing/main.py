@@ -1,6 +1,7 @@
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, PROJECT_ROOT)
 import time
 import json
 from sqlalchemy import create_engine, text
@@ -29,12 +30,38 @@ os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
+def initialize_models_with_retry():
+    """Initialize AI models with retry logic and fallbacks"""
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            # Whisper Model mit Fallback
+            try:
+                whisper_model = WhisperModel("small", device="cpu")
+                logger.info("Whisper model loaded successfully")
+            except Exception as e:
+                logger.warning(f"Whisper model loading failed: {e}")
+                whisper_model = None  # Fallback zu None
+            
+            # Sentence Model (kritisch)
+            sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("Sentence Transformer loaded successfully")
+            
+            return whisper_model, sentence_model
+            
+        except Exception as e:
+            logger.error(f"Model loading attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                logger.critical("All model loading attempts failed")
+                raise
+            time.sleep(2 ** attempt)  # Exponential backoff
+
 try:
-    whisper_model = WhisperModel("small", device="cpu")
-    sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
-    logger.info("AI models loaded successfully")
+    whisper_model, sentence_model = initialize_models_with_retry()
+    logger.info("AI models initialization completed")
 except Exception as e:
-    logger.error(f"Error loading AI models: {e}")
+    logger.error(f"Critical error loading AI models: {e}")
     exit(1)
 
 file_handler = FileHandler(IMAGES_DIR)

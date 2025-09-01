@@ -16,10 +16,18 @@ logger = logging.getLogger(__name__)
 
 class ProcessingLogic:
     def __init__(self, whisper_model, sentence_model):
-        self.whisper_model = whisper_model
-        self.sentence_model = sentence_model
+        if whisper_model is None:
+            logger.warning("Whisper model is None - audio transcription will fail")
+        if sentence_model is None:
+            raise ValueError("Sentence model cannot be None")
         self.text_chunker = SDGTextChunker(chunk_size=512, overlap=50)
-        self.translator = GoogleTranslator()
+        try:
+            from deep_translator import GoogleTranslator
+            self.translator = GoogleTranslator()
+        except ImportError:
+            logger.warning("GoogleTranslator not available - translation disabled")
+            self.translator = None
+
     
     def process_text_for_ai(self, text_content: str) -> Dict[str, Any]:
         """Process text for AI analysis - single chunk version."""
@@ -78,13 +86,48 @@ class ProcessingLogic:
         }
     
     def transcribe_audio(self, audio_path: str) -> str:
-        """Transcribe audio file using Whisper."""
+    
+    
+        # Model-Validierung
+        if not self.whisper_model:
+            raise ValueError("Whisper model not initialized")
+        
+        # Datei-Validierung
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        
+        # Dateigröße-Validierung (max 50MB)
+        file_size = os.path.getsize(audio_path)
+        max_size = 50 * 1024 * 1024  # 50MB
+        if file_size > max_size:
+            raise ValueError(f"Audio file too large: {file_size / 1024 / 1024:.1f}MB > 50MB")
+        
         try:
+            # Timeout für Transkription (max 5 Minuten)
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Transcription timeout after 5 minutes")
+            
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(300)  # 5 Minuten
+            
             segments, info = self.whisper_model.transcribe(audio_path)
             transcription = ""
             for segment in segments:
                 transcription += segment.text + " "
-            return transcription.strip()
+            
+            signal.alarm(0)  # Timeout zurücksetzen
+            
+            result = transcription.strip()
+            if not result:
+                logger.warning(f"Empty transcription for {audio_path}")
+            
+            return result
+            
+        except TimeoutError:
+            logger.error(f"Transcription timeout for {audio_path}")
+            return ""
         except Exception as e:
             logger.error(f"Error transcribing audio {audio_path}: {e}")
             return ""

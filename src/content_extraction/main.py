@@ -51,16 +51,29 @@ class ExtractionRequest(BaseModel):
         # Enhanced URL validation
         url_str = str(v)
         
-        # Block dangerous protocols
-        dangerous_protocols = ['file://', 'ftp://', 'javascript:', 'data:']
-        if any(url_str.lower().startswith(proto) for proto in dangerous_protocols):
-            raise ValueError('Unsafe URL protocol')
+    def validate_url(cls, v):
+        url_str = str(v)
         
-        # Block localhost and private IPs
+        # Erweiterte gefährliche Protokolle
+        dangerous_protocols = [
+            'file://', 'ftp://', 'javascript:', 'data:', 'gopher://', 
+            'ldap://', 'dict://', 'sftp://', 'tftp://', 'telnet://'
+        ]
+        
+        if any(url_str.lower().startswith(proto) for proto in dangerous_protocols):
+            raise ValueError(f'Unsafe URL protocol: {url_str[:20]}')
+        
+        # IP-Adresse-Validierung
         import re
-        if re.search(r'(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)', url_str):
-            raise ValueError('Local URLs not allowed')
-            
+        ip_pattern = r'https?://(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)'
+        if re.match(ip_pattern, url_str.lower()):
+            raise ValueError('Direct IP addresses not allowed')
+        
+        # Localhost-Validierung
+        localhost_patterns = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+        if any(pattern in url_str.lower() for pattern in localhost_patterns):
+            raise ValueError('Localhost URLs not allowed')
+        
         return v
 
 # Global extractors with error handling

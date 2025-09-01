@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 import time
 import json
 import weaviate
@@ -18,7 +20,15 @@ import hashlib
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+def get_database_url():
+    """Get database URL with fallback"""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        logger.warning("DATABASE_URL not set, using default")
+        return "postgresql://postgres:postgres@database_service:5432/sdg_pipeline"
+    return db_url
+
+DATABASE_URL = get_database_url()
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
 
 def get_database_engine():
@@ -36,7 +46,14 @@ def get_database_engine():
         }
     }
     
-    engine = create_engine(DATABASE_URL, **engine_kwargs)
+    engine = create_engine(
+        DATABASE_URL, 
+        pool_size=20,           
+        max_overflow=30,        
+        pool_pre_ping=True,
+        pool_recycle=1800
+        
+    )
     
     # Test connection
     max_retries = 3

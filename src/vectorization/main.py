@@ -66,38 +66,92 @@ async def lifespan(app: FastAPI):
     global embedding_manager, vector_client, similarity_search, recommendation_engine
     
     try:
-        # Load configuration (in production, use proper config management)
-        config = {
-            "weaviate": {
-                "url": "http://localhost:8080", 
+        # Load configuration with environment variable validation
+        def get_weaviate_config():
+            """Get Weaviate configuration from environment"""
+            weaviate_url = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
+            
+            # URL-Validierung
+            if not weaviate_url.startswith(('http://', 'https://')):
+                logger.error(f"Invalid WEAVIATE_URL format: {weaviate_url}")
+                # Fallback auf Standard-URL
+                weaviate_url = "http://weaviate_service:8080"
+                logger.warning(f"Using fallback URL: {weaviate_url}")
+            
+            return {
+                "url": weaviate_url,
                 "embedded": False,
-                "max_connections": 10
-            },
+                "max_connections": 10,
+                "retry_attempts": 3,
+                "retry_delay": 1.0
+            }
+        
+        config = {
+            "weaviate": get_weaviate_config(),
             "embeddings": {
                 "sentence_transformer_model": "paraphrase-multilingual-MiniLM-L12-v2",
-                "openai_api_key": None  # Set from environment
+                "openai_api_key": os.environ.get("OPENAI_API_KEY")  # None ist OK
             }
         }
         
-        # Initialize services
+        # Log configuration (ohne sensitive Daten)
+        logger.info(f"Weaviate URL: {config['weaviate']['url']}")
+        logger.info(f"OpenAI API Key configured: {bool(config['embeddings']['openai_api_key'])}")
+        
+        # Initialize services with better error handling
         logger.info("Initializing Vectorization Service...")
         
-        embedding_manager = EmbeddingManager(config.get("embeddings", {}))
-        vector_client = VectorDBClient(config.get("weaviate", {}))
-        similarity_search = SimilaritySearch(vector_client, embedding_manager)
-        recommendation_engine = SDGRecommendationEngine(similarity_search)
+        try:
+            embedding_manager = EmbeddingManager(config.get("embeddings", {}))
+            logger.info("✓ Embedding Manager initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Embedding Manager: {e}")
+            raise
         
-        logger.info("Vectorization Service initialized successfully")
+        try:
+            vector_client = VectorDBClient(config.get("weaviate", {}))
+            logger.info("✓ Vector Database Client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Vector DB Client: {e}")
+            raise
+            
+        try:
+            similarity_search = SimilaritySearch(vector_client, embedding_manager)
+            logger.info("✓ Similarity Search initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Similarity Search: {e}")
+            raise
+            
+        try:
+            recommendation_engine = SDGRecommendationEngine(similarity_search)
+            logger.info("✓ SDG Recommendation Engine initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Recommendation Engine: {e}")
+            raise
+        
+        logger.info("🚀 Vectorization Service initialized successfully")
         yield
         
     except Exception as e:
-        logger.error(f"Error during startup: {e}")
+        logger.error(f"❌ Critical error during startup: {e}")
+        # Cleanup partially initialized services
+        if 'vector_client' in locals() and vector_client:
+            try:
+                vector_client.close()
+            except:
+                pass
         raise
     finally:
         # Shutdown
+        logger.info("🔄 Starting Vectorization Service shutdown...")
         if vector_client:
-            vector_client.close()
-        logger.info("Vectorization Service shutdown complete")
+            try:
+                vector_client.close()
+                logger.info("✓ Vector Database Client closed")
+            except Exception as e:
+                logger.warning(f"Error closing vector client: {e}")
+        logger.info("✅ Vectorization Service shutdown complete")
+
 
 # Initialize FastAPI app
 app = FastAPI(

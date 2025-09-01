@@ -17,6 +17,10 @@ def get_database_url():
         db_name = secrets_manager.get_secret("POSTGRES_DB")
         db_user = secrets_manager.get_secret("POSTGRES_USER")
         db_password = secrets_manager.get_secret("POSTGRES_PASSWORD")
+
+        if not all([db_user, db_password, db_name]):
+            logger.error("Required database credentials missing")
+            raise ValueError("Database configuration incomplete")
         
         return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     except Exception as e:

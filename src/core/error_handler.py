@@ -78,6 +78,45 @@ def handle_errors(error_types: tuple = (Exception,),
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
     return decorator
 
+
+# Nach Zeile 100 hinzufügen:
+
+class CircuitBreaker:
+    """Circuit breaker pattern for external service calls"""
+    
+    def __init__(self, failure_threshold=5, recovery_timeout=60):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+    
+    def call(self, func, *args, **kwargs):
+        """Execute function with circuit breaker protection"""
+        if self.state == "OPEN":
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                self.state = "HALF_OPEN"
+            else:
+                raise Exception("Circuit breaker is OPEN")
+        
+        try:
+            result = func(*args, **kwargs)
+            if self.state == "HALF_OPEN":
+                self.state = "CLOSED"
+                self.failure_count = 0
+            return result
+        except Exception as e:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            
+            if self.failure_count >= self.failure_threshold:
+                self.state = "OPEN"
+            
+            raise e
+
+weaviate_circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
+external_api_circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60)
+
 class ErrorRecoveryManager:
     """Manages error recovery strategies"""
     

@@ -28,13 +28,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
-if not allowed_origins or allowed_origins == [""]:
-    if os.environ.get("ENVIRONMENT") == "development":
-        allowed_origins = ["http://localhost:3000", "http://localhost:8080"]
-    else:
-        raise ValueError("ALLOWED_ORIGINS must be set in production")
+def get_allowed_origins():
+    origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
+    origins = [origin.strip() for origin in origins if origin.strip()]
+    
+    if not origins:
+        if os.environ.get("ENVIRONMENT") == "development":
+            return ["http://localhost:3000", "http://localhost:8080"]
+        else:
+            raise ValueError("ALLOWED_ORIGINS must be set in production")
+    
+    for origin in origins:
+        if not origin.startswith(('http://', 'https://')):
+            raise ValueError(f"Invalid origin format: {origin}")
+    
+    return origins
 
+allowed_origins = get_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,21 +82,28 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
 
-# Simple in-memory user store (replace with database in production)
-users_db = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": bcrypt.hashpw(
-            secrets_manager.get_secret("ADMIN_PASSWORD").encode(), 
-            bcrypt.gensalt()
-        ).decode(),
-        "email": "admin@sdg-pipeline.org",
-        "role": "admin",
-        "is_active": True,
-        "created_at": datetime.utcnow(),
-        "last_login": None
-    }
-}
+class UserDatabase:
+    def __init__(self):
+        self.users = {}
+        self._initialize_admin_user()
+    
+    def _initialize_admin_user(self):
+        admin_password = secrets_manager.get_secret("ADMIN_PASSWORD")
+        if not admin_password:
+            raise ValueError("ADMIN_PASSWORD not configured")
+        
+        self.users["hwe"] = {
+            "username": "hwe",
+            "hashed_password": bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode(),
+            "email": "heinrich.ekam@gmail.com",
+            "role": "admin",
+            "is_active": True,
+            "created_at": datetime.utcnow(),
+            "last_login": None
+        }
+
+users_db = UserDatabase().users
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password against hash."""
