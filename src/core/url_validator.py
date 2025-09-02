@@ -53,6 +53,9 @@ class URLValidator:
         Validate URL for SSRF protection
         Returns: (is_valid, error_message)
         """
+        if self._is_ip_blocked(ip):
+            return False, f"IP address {ip} is in blocked range"
+
         try:
             # Basic URL parsing
             parsed = urlparse(url.lower())

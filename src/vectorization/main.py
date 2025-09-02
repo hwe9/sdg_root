@@ -3,6 +3,7 @@
 SDG Vectorization Service - FastAPI Application
 Microservice for embedding generation, vector storage, and semantic search
 """
+import os
 import logging
 from typing import List, Dict, Any, Optional
 import asyncio

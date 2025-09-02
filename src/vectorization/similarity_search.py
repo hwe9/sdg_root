@@ -319,7 +319,7 @@ class SimilaritySearch:
         }
     
     def _get_interlinkage_suggestions(self, 
-                                    results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                                    results: List[Dict[str, Any]]):
         """Generate SDG interlinkage suggestions based on search results"""
         sdg_frequency = defaultdict(int)
         

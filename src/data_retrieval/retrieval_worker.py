@@ -232,7 +232,6 @@ class RetrievalWorker:
             safe_filename += '.pdf'  # Default extension
 
         return safe_filename
-        
 
     def save_to_file(self, data):
         with open(self.processed_file, "w", encoding="utf-8") as f:

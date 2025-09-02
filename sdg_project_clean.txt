@@ -305,6 +305,16 @@ services:
 
 
 
+### /source /mnt/gigabyte1tb/SDG/sdg_root/llama-4-Maverick-Instruct.txt
+Llama-4-Maverick-17B-128E-Instruct
+
+https://llama4.llamameta.net/*?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoiYTY1dHloa3c3YjFzYnJwdXhrcjQxNm1vIiwiUmVzb3VyY2UiOiJodHRwczpcL1wvbGxhbWE0LmxsYW1hbWV0YS5uZXRcLyoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTY5MjU1MDl9fX1dfQ__&Signature=JreXakRZgL%7EskJwjYRzB6yysKqreelilOAFTc9Vjk3SKYHB0%7EFKNKBp3tdnkoA-vg9MvGPoEusR92MNnK34zjT8Udzi%7EpXZgAXkhpqO5cqbhSxiZ-gKpW-WiN7c6GsekYdClc%7ETrJnUx%7EMSmDDyCFFWLPm9HOZAjiXnuE6aZyhW1PVmrWyVB1nStyvo3Q1pVf%7EirzZTHtOtIaGvto6gd00VfRPEw3BWk8Oa9HZ21onegn7qECc7ciAF6hVrf-zs4VOJJRmjdMC-MwmJ6g3EP2oIO5HX6MGrhgnpaG3psML1GcyMeae30SkjJAUuLV1owIhZYOxxNrZfzYnlhrZOA9A__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=1694099511302225
+
+HF-Token
+Name: llama-4
+token: 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
+
+
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/requirements-security.txt
 # /sdg_root/requirements-security.txt
 cryptography>=41.0.0
@@ -506,6 +516,8 @@ if __name__ == "__main__":
             'exclude_dirs': [
                 'Book',
                 'oss20b',
+                'llama_4',
+                'llama-model',
                 'threads',
                 'data', 
                 '__pycache__',     # Python Cache
@@ -897,6 +909,16 @@ services:
 
 
 
+### /source /mnt/gigabyte1tb/SDG/sdg_root/llama-4-Maverick-Instruct.txt
+Llama-4-Maverick-17B-128E-Instruct
+
+https://llama4.llamameta.net/*?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoiYTY1dHloa3c3YjFzYnJwdXhrcjQxNm1vIiwiUmVzb3VyY2UiOiJodHRwczpcL1wvbGxhbWE0LmxsYW1hbWV0YS5uZXRcLyoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTY5MjU1MDl9fX1dfQ__&Signature=JreXakRZgL%7EskJwjYRzB6yysKqreelilOAFTc9Vjk3SKYHB0%7EFKNKBp3tdnkoA-vg9MvGPoEusR92MNnK34zjT8Udzi%7EpXZgAXkhpqO5cqbhSxiZ-gKpW-WiN7c6GsekYdClc%7ETrJnUx%7EMSmDDyCFFWLPm9HOZAjiXnuE6aZyhW1PVmrWyVB1nStyvo3Q1pVf%7EirzZTHtOtIaGvto6gd00VfRPEw3BWk8Oa9HZ21onegn7qECc7ciAF6hVrf-zs4VOJJRmjdMC-MwmJ6g3EP2oIO5HX6MGrhgnpaG3psML1GcyMeae30SkjJAUuLV1owIhZYOxxNrZfzYnlhrZOA9A__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=1694099511302225
+
+HF-Token
+Name: llama-4
+token: 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
+
+
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/requirements-security.txt
 # /sdg_root/requirements-security.txt
 cryptography>=41.0.0
@@ -1098,6 +1120,8 @@ if __name__ == "__main__":
             'exclude_dirs': [
                 'Book',
                 'oss20b',
+                'llama_4',
+                'llama-model',
                 'threads',
                 'data', 
                 '__pycache__',     # Python Cache
@@ -1166,7 +1190,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from .core.secrets_manager import secrets_manager
+from ..core.secrets_manager import secrets_manager
 
 import logging
 
@@ -1200,7 +1224,6 @@ engine_kwargs = {
     "pool_size": 10,
     "max_overflow": 20,
     "connect_args": {
-        "sslmode": "require",  # Require SSL
         "options": "-c default_transaction_isolation=serializable"
     }
 }
@@ -1244,6 +1267,8 @@ from sqlalchemy.orm import Session
 from typing import List
 import models, schemas
 from database import get_db
+import asyncio
+import jwt 
 
 app = FastAPI()
 
@@ -1638,7 +1663,7 @@ if __name__ == "__main__":
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/api/models.py
 import os
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, Table, JSON, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, Table, JSON, Boolean, Index
 
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base
 
@@ -1703,7 +1728,7 @@ class Sdg(Base):
     priority_weight = Column(Float, default=1.0) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+    targets = relationship("SDGTarget", back_populates="goal")
     progress = relationship("SdgProgress", back_populates="sdg")
     articles_multi = relationship("Article", secondary=articles_sdg_targets, back_populates="sdgs_multi")
 class SDGTarget(Base):
@@ -2476,7 +2501,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         
         return user
         
-    except wt.PyJWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
@@ -5342,6 +5367,20 @@ except ImportError as e:
     NewsletterExtractor = DummyExtractor
     RSSExtractor = DummyExtractor
 
+async def initialize_extractors():
+    config = {
+        "retry_attempts": 3,
+        "timeout": 30,
+        "user_agent": "SDG-Pipeline-ContentExtractor/1.0"
+    }
+    
+    try:
+        extractors['web'] = WebExtractor(config)
+        logger.info("✓ Web extractor initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize extractors: {e}")
+        extractors['web'] = DummyExtractor(config)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -6439,18 +6478,22 @@ class SecretsManager:
         return self.cipher.decrypt(encrypted.encode()).decode()
     
     def get_secret(self, key: str) -> str:
-        """Get decrypted secret from environment"""
-        encrypted_value = os.environ.get(f"{key}_ENCRYPTED")
-        if encrypted_value:
-            return self.decrypt_secret(encrypted_value)
-        
-        # Fallback to plaintext for development (with warning)
-        plaintext_value = os.environ.get(key)
-        if plaintext_value and os.environ.get('ENVIRONMENT') != 'production':
-            logger.warning(f"Using plaintext secret for {key} in development")
-            return plaintext_value
-        
-        raise ValueError(f"Secret {key} not found or not properly encrypted")
+        """Enhanced error handling"""
+        try:
+            encrypted_value = os.environ.get(f"{key}_ENCRYPTED")
+            if encrypted_value:
+                return self.decrypt_secret(encrypted_value)
+            
+            # Fallback für Development
+            plaintext_value = os.environ.get(key)
+            if plaintext_value and os.environ.get('ENVIRONMENT') != 'production':
+                logger.warning(f"Using plaintext secret for {key}")
+                return plaintext_value
+            
+            raise ValueError(f"Secret {key} not found")
+        except Exception as e:
+            logger.error(f"Error retrieving secret {key}: {e}")
+            raise
 
 # Initialize global secrets manager
 secrets_manager = SecretsManager()
@@ -6724,6 +6767,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 import time
 import json
 import weaviate
+from contextlib import contextmanager
 from sqlalchemy import create_engine, text, MetaData, Table
 from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -7266,6 +7310,7 @@ def search_similar_content(
 
 def _extract_publication_year(metadata: Dict[str, Any]) -> Optional[int]:
     """Extract publication year from various metadata fields"""
+    import re
     year_fields = ['publication_year', 'year', 'published_year']
     
     for field in year_fields:
@@ -7781,7 +7826,7 @@ generic_keywords_dict = {
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/data_processing/core/processing_logic.py
 # /sdg_root/src/data_processing/core/processing_logic.py
 
-import re
+import re, os
 from typing import Dict, Any, List
 from .text_chunker import SDGTextChunker
 from .keywords import sdg_keywords_dict, ai_keywords_dict
@@ -9090,6 +9135,8 @@ class RetrievalWorker:
         # Add extension if missing
         if '.' not in safe_filename:
             safe_filename += '.pdf'  # Default extension
+
+        return safe_filename
         
 
     def save_to_file(self, data):
@@ -10610,6 +10657,7 @@ class VectorDBClient:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
+                    self.client = weaviate.Client(url=weaviate_url)
                     if self.client.is_ready():
                         logger.info(f"Weaviate client initialized successfully (attempt {attempt + 1})")
                         break
