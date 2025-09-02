@@ -181,6 +181,8 @@ if __name__ == "__main__":
             'exclude_dirs': [
                 'Book',
                 'oss20b',
+                'llama_4',
+                'llama-model',
                 'threads',
                 'data', 
                 '__pycache__',     # Python Cache
