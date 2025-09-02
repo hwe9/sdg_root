@@ -164,7 +164,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         
         return user
         
-    except wt.PyJWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:

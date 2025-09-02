@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, Table, JSON, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, Table, JSON, Boolean, Index
 
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base
 
@@ -65,7 +65,7 @@ class Sdg(Base):
     priority_weight = Column(Float, default=1.0) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+    targets = relationship("SDGTarget", back_populates="goal")
     progress = relationship("SdgProgress", back_populates="sdg")
     articles_multi = relationship("Article", secondary=articles_sdg_targets, back_populates="sdgs_multi")
 class SDGTarget(Base):

@@ -1,6 +1,6 @@
 # /sdg_root/src/data_processing/core/processing_logic.py
 
-import re
+import re, os
 from typing import Dict, Any, List
 from .text_chunker import SDGTextChunker
 from .keywords import sdg_keywords_dict, ai_keywords_dict

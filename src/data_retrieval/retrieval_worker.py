@@ -230,6 +230,8 @@ class RetrievalWorker:
         # Add extension if missing
         if '.' not in safe_filename:
             safe_filename += '.pdf'  # Default extension
+
+        return safe_filename
         
 
     def save_to_file(self, data):

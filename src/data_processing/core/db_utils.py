@@ -4,6 +4,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 import time
 import json
 import weaviate
+from contextlib import contextmanager
 from sqlalchemy import create_engine, text, MetaData, Table
 from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -546,6 +547,7 @@ def search_similar_content(
 
 def _extract_publication_year(metadata: Dict[str, Any]) -> Optional[int]:
     """Extract publication year from various metadata fields"""
+    import re
     year_fields = ['publication_year', 'year', 'published_year']
     
     for field in year_fields:

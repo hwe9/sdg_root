@@ -79,6 +79,7 @@ class VectorDBClient:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
+                    self.client = weaviate.Client(url=weaviate_url)
                     if self.client.is_ready():
                         logger.info(f"Weaviate client initialized successfully (attempt {attempt + 1})")
                         break

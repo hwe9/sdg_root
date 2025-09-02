@@ -35,6 +35,20 @@ except ImportError as e:
     NewsletterExtractor = DummyExtractor
     RSSExtractor = DummyExtractor
 
+async def initialize_extractors():
+    config = {
+        "retry_attempts": 3,
+        "timeout": 30,
+        "user_agent": "SDG-Pipeline-ContentExtractor/1.0"
+    }
+    
+    try:
+        extractors['web'] = WebExtractor(config)
+        logger.info("✓ Web extractor initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize extractors: {e}")
+        extractors['web'] = DummyExtractor(config)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

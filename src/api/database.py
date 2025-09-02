@@ -2,7 +2,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from .core.secrets_manager import secrets_manager
+from ..core.secrets_manager import secrets_manager
 
 import logging
 
@@ -36,7 +36,6 @@ engine_kwargs = {
     "pool_size": 10,
     "max_overflow": 20,
     "connect_args": {
-        "sslmode": "require",  # Require SSL
         "options": "-c default_transaction_isolation=serializable"
     }
 }

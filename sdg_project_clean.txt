@@ -7,7 +7,6 @@ networks:
     driver: bridge
 
 services:
-
   nginx_proxy:
     image: nginx:alpine
     container_name: nginx_proxy
@@ -25,34 +24,33 @@ services:
       - api_service
 
   auth_service:
-  build: 
-    context: ${SRC_ROOT}/auth
+    build: ${SRC_ROOT}/auth
     dockerfile: Dockerfile
-  container_name: auth_service
-  expose:
-      - "8005"
-  volumes:
-      - ${SRC_ROOT}/auth:/app
-  environment:
-      - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
-      - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
-  networks:
-    - sdg_internal
-  depends_on:
-    database_service:
-      condition: service_healthy
-  command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-  deploy:
-    resources:
-      limits:
-        cpus: '0.5'
-        memory: '512M'
+    container_name: auth_service
+    expose:
+        - "8005"
+    volumes:
+        - ${SRC_ROOT}/auth:/app
+    environment:
+        - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
+        - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
+        - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+    networks:
+      - sdg_internal
+    depends_on:
+      database_service:
+        condition: service_healthy
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '512M'
 
   api_service:
     build: ${SRC_ROOT}/api
@@ -171,7 +169,7 @@ services:
     depends_on:
       weaviate_service:
         condition: service_healthy
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
 
   
   data_retrieval_service:
@@ -184,6 +182,7 @@ services:
       - ${DATA_ROOT}/raw_data:/app/raw_data
       - ${DATA_ROOT}/quelle.txt:/app/quelle.txt
     environment:
+      - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL}
     depends_on:
       database_service:
@@ -600,7 +599,6 @@ networks:
     driver: bridge
 
 services:
-
   nginx_proxy:
     image: nginx:alpine
     container_name: nginx_proxy
@@ -618,34 +616,33 @@ services:
       - api_service
 
   auth_service:
-  build: 
-    context: ${SRC_ROOT}/auth
+    build: ${SRC_ROOT}/auth
     dockerfile: Dockerfile
-  container_name: auth_service
-  expose:
-      - "8005"
-  volumes:
-      - ${SRC_ROOT}/auth:/app
-  environment:
-      - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
-      - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
-  networks:
-    - sdg_internal
-  depends_on:
-    database_service:
-      condition: service_healthy
-  command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-  deploy:
-    resources:
-      limits:
-        cpus: '0.5'
-        memory: '512M'
+    container_name: auth_service
+    expose:
+        - "8005"
+    volumes:
+        - ${SRC_ROOT}/auth:/app
+    environment:
+        - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
+        - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
+        - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+    networks:
+      - sdg_internal
+    depends_on:
+      database_service:
+        condition: service_healthy
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '512M'
 
   api_service:
     build: ${SRC_ROOT}/api
@@ -764,7 +761,7 @@ services:
     depends_on:
       weaviate_service:
         condition: service_healthy
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
 
   
   data_retrieval_service:
@@ -777,6 +774,7 @@ services:
       - ${DATA_ROOT}/raw_data:/app/raw_data
       - ${DATA_ROOT}/quelle.txt:/app/quelle.txt
     environment:
+      - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL}
     depends_on:
       database_service:
@@ -1183,6 +1181,10 @@ def get_database_url():
         db_name = secrets_manager.get_secret("POSTGRES_DB")
         db_user = secrets_manager.get_secret("POSTGRES_USER")
         db_password = secrets_manager.get_secret("POSTGRES_PASSWORD")
+
+        if not all([db_user, db_password, db_name]):
+            logger.error("Required database credentials missing")
+            raise ValueError("Database configuration incomplete")
         
         return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     except Exception as e:
@@ -2338,13 +2340,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
-if not allowed_origins or allowed_origins == [""]:
-    if os.environ.get("ENVIRONMENT") == "development":
-        allowed_origins = ["http://localhost:3000", "http://localhost:8080"]
-    else:
-        raise ValueError("ALLOWED_ORIGINS must be set in production")
+def get_allowed_origins():
+    origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
+    origins = [origin.strip() for origin in origins if origin.strip()]
+    
+    if not origins:
+        if os.environ.get("ENVIRONMENT") == "development":
+            return ["http://localhost:3000", "http://localhost:8080"]
+        else:
+            raise ValueError("ALLOWED_ORIGINS must be set in production")
+    
+    for origin in origins:
+        if not origin.startswith(('http://', 'https://')):
+            raise ValueError(f"Invalid origin format: {origin}")
+    
+    return origins
 
+allowed_origins = get_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
@@ -2382,21 +2394,28 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
 
-# Simple in-memory user store (replace with database in production)
-users_db = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": bcrypt.hashpw(
-            secrets_manager.get_secret("ADMIN_PASSWORD").encode(), 
-            bcrypt.gensalt()
-        ).decode(),
-        "email": "admin@sdg-pipeline.org",
-        "role": "admin",
-        "is_active": True,
-        "created_at": datetime.utcnow(),
-        "last_login": None
-    }
-}
+class UserDatabase:
+    def __init__(self):
+        self.users = {}
+        self._initialize_admin_user()
+    
+    def _initialize_admin_user(self):
+        admin_password = secrets_manager.get_secret("ADMIN_PASSWORD")
+        if not admin_password:
+            raise ValueError("ADMIN_PASSWORD not configured")
+        
+        self.users["hwe"] = {
+            "username": "hwe",
+            "hashed_password": bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode(),
+            "email": "heinrich.ekam@gmail.com",
+            "role": "admin",
+            "is_active": True,
+            "created_at": datetime.utcnow(),
+            "last_login": None
+        }
+
+users_db = UserDatabase().users
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password against hash."""
@@ -5339,16 +5358,29 @@ class ExtractionRequest(BaseModel):
         # Enhanced URL validation
         url_str = str(v)
         
-        # Block dangerous protocols
-        dangerous_protocols = ['file://', 'ftp://', 'javascript:', 'data:']
-        if any(url_str.lower().startswith(proto) for proto in dangerous_protocols):
-            raise ValueError('Unsafe URL protocol')
+    def validate_url(cls, v):
+        url_str = str(v)
         
-        # Block localhost and private IPs
+        # Erweiterte gefährliche Protokolle
+        dangerous_protocols = [
+            'file://', 'ftp://', 'javascript:', 'data:', 'gopher://', 
+            'ldap://', 'dict://', 'sftp://', 'tftp://', 'telnet://'
+        ]
+        
+        if any(url_str.lower().startswith(proto) for proto in dangerous_protocols):
+            raise ValueError(f'Unsafe URL protocol: {url_str[:20]}')
+        
+        # IP-Adresse-Validierung
         import re
-        if re.search(r'(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)', url_str):
-            raise ValueError('Local URLs not allowed')
-            
+        ip_pattern = r'https?://(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)'
+        if re.match(ip_pattern, url_str.lower()):
+            raise ValueError('Direct IP addresses not allowed')
+        
+        # Localhost-Validierung
+        localhost_patterns = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+        if any(pattern in url_str.lower() for pattern in localhost_patterns):
+            raise ValueError('Localhost URLs not allowed')
+        
         return v
 
 # Global extractors with error handling
@@ -6020,6 +6052,45 @@ def handle_errors(error_types: tuple = (Exception,),
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
     return decorator
 
+
+# Nach Zeile 100 hinzufügen:
+
+class CircuitBreaker:
+    """Circuit breaker pattern for external service calls"""
+    
+    def __init__(self, failure_threshold=5, recovery_timeout=60):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+    
+    def call(self, func, *args, **kwargs):
+        """Execute function with circuit breaker protection"""
+        if self.state == "OPEN":
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                self.state = "HALF_OPEN"
+            else:
+                raise Exception("Circuit breaker is OPEN")
+        
+        try:
+            result = func(*args, **kwargs)
+            if self.state == "HALF_OPEN":
+                self.state = "CLOSED"
+                self.failure_count = 0
+            return result
+        except Exception as e:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            
+            if self.failure_count >= self.failure_threshold:
+                self.state = "OPEN"
+            
+            raise e
+
+weaviate_circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
+external_api_circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60)
+
 class ErrorRecoveryManager:
     """Manages error recovery strategies"""
     
@@ -6648,6 +6719,8 @@ class ApiClient:
 
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/data_processing/core/db_utils.py
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 import time
 import json
 import weaviate
@@ -6667,7 +6740,15 @@ import hashlib
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+def get_database_url():
+    """Get database URL with fallback"""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        logger.warning("DATABASE_URL not set, using default")
+        return "postgresql://postgres:postgres@database_service:5432/sdg_pipeline"
+    return db_url
+
+DATABASE_URL = get_database_url()
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
 
 def get_database_engine():
@@ -6685,7 +6766,14 @@ def get_database_engine():
         }
     }
     
-    engine = create_engine(DATABASE_URL, **engine_kwargs)
+    engine = create_engine(
+        DATABASE_URL, 
+        pool_size=20,           
+        max_overflow=30,        
+        pool_pre_ping=True,
+        pool_recycle=1800
+        
+    )
     
     # Test connection
     max_retries = 3
@@ -7709,10 +7797,18 @@ logger = logging.getLogger(__name__)
 
 class ProcessingLogic:
     def __init__(self, whisper_model, sentence_model):
-        self.whisper_model = whisper_model
-        self.sentence_model = sentence_model
+        if whisper_model is None:
+            logger.warning("Whisper model is None - audio transcription will fail")
+        if sentence_model is None:
+            raise ValueError("Sentence model cannot be None")
         self.text_chunker = SDGTextChunker(chunk_size=512, overlap=50)
-        self.translator = GoogleTranslator()
+        try:
+            from deep_translator import GoogleTranslator
+            self.translator = GoogleTranslator()
+        except ImportError:
+            logger.warning("GoogleTranslator not available - translation disabled")
+            self.translator = None
+
     
     def process_text_for_ai(self, text_content: str) -> Dict[str, Any]:
         """Process text for AI analysis - single chunk version."""
@@ -7771,13 +7867,48 @@ class ProcessingLogic:
         }
     
     def transcribe_audio(self, audio_path: str) -> str:
-        """Transcribe audio file using Whisper."""
+    
+    
+        # Model-Validierung
+        if not self.whisper_model:
+            raise ValueError("Whisper model not initialized")
+        
+        # Datei-Validierung
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        
+        # Dateigröße-Validierung (max 50MB)
+        file_size = os.path.getsize(audio_path)
+        max_size = 50 * 1024 * 1024  # 50MB
+        if file_size > max_size:
+            raise ValueError(f"Audio file too large: {file_size / 1024 / 1024:.1f}MB > 50MB")
+        
         try:
+            # Timeout für Transkription (max 5 Minuten)
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Transcription timeout after 5 minutes")
+            
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(300)  # 5 Minuten
+            
             segments, info = self.whisper_model.transcribe(audio_path)
             transcription = ""
             for segment in segments:
                 transcription += segment.text + " "
-            return transcription.strip()
+            
+            signal.alarm(0)  # Timeout zurücksetzen
+            
+            result = transcription.strip()
+            if not result:
+                logger.warning(f"Empty transcription for {audio_path}")
+            
+            return result
+            
+        except TimeoutError:
+            logger.error(f"Transcription timeout for {audio_path}")
+            return ""
         except Exception as e:
             logger.error(f"Error transcribing audio {audio_path}: {e}")
             return ""
@@ -8461,7 +8592,8 @@ class TextVectorizer:
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/data_processing/main.py
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, PROJECT_ROOT)
 import time
 import json
 from sqlalchemy import create_engine, text
@@ -8490,12 +8622,38 @@ os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
+def initialize_models_with_retry():
+    """Initialize AI models with retry logic and fallbacks"""
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            # Whisper Model mit Fallback
+            try:
+                whisper_model = WhisperModel("small", device="cpu")
+                logger.info("Whisper model loaded successfully")
+            except Exception as e:
+                logger.warning(f"Whisper model loading failed: {e}")
+                whisper_model = None  # Fallback zu None
+            
+            # Sentence Model (kritisch)
+            sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("Sentence Transformer loaded successfully")
+            
+            return whisper_model, sentence_model
+            
+        except Exception as e:
+            logger.error(f"Model loading attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                logger.critical("All model loading attempts failed")
+                raise
+            time.sleep(2 ** attempt)  # Exponential backoff
+
 try:
-    whisper_model = WhisperModel("small", device="cpu")
-    sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
-    logger.info("AI models loaded successfully")
+    whisper_model, sentence_model = initialize_models_with_retry()
+    logger.info("AI models initialization completed")
 except Exception as e:
-    logger.error(f"Error loading AI models: {e}")
+    logger.error(f"Critical error loading AI models: {e}")
     exit(1)
 
 file_handler = FileHandler(IMAGES_DIR)
@@ -9331,38 +9489,92 @@ async def lifespan(app: FastAPI):
     global embedding_manager, vector_client, similarity_search, recommendation_engine
     
     try:
-        # Load configuration (in production, use proper config management)
-        config = {
-            "weaviate": {
-                "url": "http://localhost:8080", 
+        # Load configuration with environment variable validation
+        def get_weaviate_config():
+            """Get Weaviate configuration from environment"""
+            weaviate_url = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
+            
+            # URL-Validierung
+            if not weaviate_url.startswith(('http://', 'https://')):
+                logger.error(f"Invalid WEAVIATE_URL format: {weaviate_url}")
+                # Fallback auf Standard-URL
+                weaviate_url = "http://weaviate_service:8080"
+                logger.warning(f"Using fallback URL: {weaviate_url}")
+            
+            return {
+                "url": weaviate_url,
                 "embedded": False,
-                "max_connections": 10
-            },
+                "max_connections": 10,
+                "retry_attempts": 3,
+                "retry_delay": 1.0
+            }
+        
+        config = {
+            "weaviate": get_weaviate_config(),
             "embeddings": {
                 "sentence_transformer_model": "paraphrase-multilingual-MiniLM-L12-v2",
-                "openai_api_key": None  # Set from environment
+                "openai_api_key": os.environ.get("OPENAI_API_KEY")  # None ist OK
             }
         }
         
-        # Initialize services
+        # Log configuration (ohne sensitive Daten)
+        logger.info(f"Weaviate URL: {config['weaviate']['url']}")
+        logger.info(f"OpenAI API Key configured: {bool(config['embeddings']['openai_api_key'])}")
+        
+        # Initialize services with better error handling
         logger.info("Initializing Vectorization Service...")
         
-        embedding_manager = EmbeddingManager(config.get("embeddings", {}))
-        vector_client = VectorDBClient(config.get("weaviate", {}))
-        similarity_search = SimilaritySearch(vector_client, embedding_manager)
-        recommendation_engine = SDGRecommendationEngine(similarity_search)
+        try:
+            embedding_manager = EmbeddingManager(config.get("embeddings", {}))
+            logger.info("✓ Embedding Manager initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Embedding Manager: {e}")
+            raise
         
-        logger.info("Vectorization Service initialized successfully")
+        try:
+            vector_client = VectorDBClient(config.get("weaviate", {}))
+            logger.info("✓ Vector Database Client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Vector DB Client: {e}")
+            raise
+            
+        try:
+            similarity_search = SimilaritySearch(vector_client, embedding_manager)
+            logger.info("✓ Similarity Search initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Similarity Search: {e}")
+            raise
+            
+        try:
+            recommendation_engine = SDGRecommendationEngine(similarity_search)
+            logger.info("✓ SDG Recommendation Engine initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Recommendation Engine: {e}")
+            raise
+        
+        logger.info("🚀 Vectorization Service initialized successfully")
         yield
         
     except Exception as e:
-        logger.error(f"Error during startup: {e}")
+        logger.error(f"❌ Critical error during startup: {e}")
+        # Cleanup partially initialized services
+        if 'vector_client' in locals() and vector_client:
+            try:
+                vector_client.close()
+            except:
+                pass
         raise
     finally:
         # Shutdown
+        logger.info("🔄 Starting Vectorization Service shutdown...")
         if vector_client:
-            vector_client.close()
-        logger.info("Vectorization Service shutdown complete")
+            try:
+                vector_client.close()
+                logger.info("✓ Vector Database Client closed")
+            except Exception as e:
+                logger.warning(f"Error closing vector client: {e}")
+        logger.info("✅ Vectorization Service shutdown complete")
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -10361,7 +10573,7 @@ class VectorDBClient:
         self._setup_sdg_schema()
     
     def _initialize_client(self):
-        """Initialize Weaviate client with configuration"""
+        """Initialize Weaviate client with configuration and URL validation"""
         try:
             if self.config.get("embedded", False):
                 # Embedded Weaviate for development
@@ -10373,7 +10585,13 @@ class VectorDBClient:
                     )
                 )
             else:
-                # Remote Weaviate instance
+                # Remote Weaviate instance mit URL-Validierung
+                weaviate_url = self.config.get("url", "http://localhost:8080")
+                
+                # URL-Validierung hinzufügen
+                if not weaviate_url.startswith(('http://', 'https://')):
+                    raise ValueError(f"Invalid Weaviate URL format: {weaviate_url}")
+                
                 auth_config = None
                 if self.config.get("api_key"):
                     auth_config = weaviate.AuthApiKey(api_key=self.config["api_key"])
@@ -10383,81 +10601,149 @@ class VectorDBClient:
                     headers["X-OpenAI-Api-Key"] = self.config["openai_api_key"]
                 
                 self.client = weaviate.Client(
-                    url=self.config.get("url", "http://localhost:8080"),
+                    url=weaviate_url,  # Validierte URL verwenden
                     auth_client_secret=auth_config,
                     additional_headers=headers
                 )
             
-            # Test connection
-            if self.client.is_ready():
-                logger.info("Weaviate client initialized successfully")
-            else:
-                raise ConnectionError("Weaviate client not ready")
+            # Test connection mit Retry-Logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if self.client.is_ready():
+                        logger.info(f"Weaviate client initialized successfully (attempt {attempt + 1})")
+                        break
+                    else:
+                        raise ConnectionError(f"Weaviate client not ready (attempt {attempt + 1})")
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Failed to establish Weaviate connection after {max_retries} attempts: {e}")
+                        raise
+                    else:
+                        logger.warning(f"Weaviate connection attempt {attempt + 1} failed: {e}")
+                        time.sleep(2 ** attempt)  # Exponential backoff
                 
         except Exception as e:
             logger.error(f"Error initializing Weaviate client: {e}")
             raise
     
     def _setup_sdg_schema(self):
-    
+        """Setup SDG schema with version compatibility check"""
         try:
-            # Verbesserte SDG Article Schema mit Validation
+            # Schema-Versions-Kompatibilität prüfen
+            current_version = "1.0"
+            
+            try:
+                existing_schema = self.client.schema.get("SDGArticle")
+                existing_version = existing_schema.get("version", "0.0")
+                
+                if existing_version != current_version:
+                    logger.warning(f"Schema version mismatch: {existing_version} != {current_version}")
+                    # Schema-Migration falls erforderlich
+                    self._migrate_schema(existing_version, current_version)
+                else:
+                    logger.info("SDGArticle schema already exists with correct version")
+                    return
+                    
+            except weaviate.exceptions.UnexpectedStatusCodeException:
+                # Schema existiert nicht, neu erstellen
+                pass
+            
+            # Verbesserte Schema-Definition
             sdg_article_schema = {
                 "class": "SDGArticle",
-                "description": "SDG-related articles and documents",
+                "description": "SDG-related articles and documents with full metadata",
                 "vectorizer": "none",
+                "version": current_version,
                 "properties": [
                     {
                         "name": "title",
                         "dataType": ["text"],
                         "description": "Article title",
-                        "tokenization": "word"
+                        "tokenization": "word",
+                        "indexFilterable": True
                     },
                     {
-                        "name": "content",
+                        "name": "content", 
                         "dataType": ["text"],
                         "description": "Full article content",
+                        "tokenization": "word",
+                        "indexSearchable": True
+                    },
+                    {
+                        "name": "summary",
+                        "dataType": ["text"], 
+                        "description": "Article summary",
                         "tokenization": "word"
                     },
                     {
                         "name": "sdg_goals",
                         "dataType": ["int[]"],
-                        "description": "Related SDG goals (1-17)"
+                        "description": "Related SDG goals (1-17)",
+                        "indexFilterable": True
                     },
                     {
                         "name": "region",
                         "dataType": ["text"],
-                        "description": "Geographic region"
+                        "description": "Geographic region",
+                        "indexFilterable": True
                     },
                     {
-                        "name": "language",
+                        "name": "language", 
                         "dataType": ["text"],
-                        "description": "Content language"
+                        "description": "Content language",
+                        "indexFilterable": True
                     },
                     {
                         "name": "confidence_score",
                         "dataType": ["number"],
-                        "description": "SDG classification confidence",
+                        "description": "SDG classification confidence (0.0-1.0)",
                         "indexFilterable": True,
                         "indexSearchable": False
+                    },
+                    {
+                        "name": "publication_date",
+                        "dataType": ["date"],
+                        "description": "Publication date",
+                        "indexFilterable": True
+                    },
+                    {
+                        "name": "source_url",
+                        "dataType": ["text"],
+                        "description": "Original source URL",
+                        "indexFilterable": False
                     }
                 ]
             }
             
-            # Schema nur erstellen wenn es nicht existiert
-            try:
-                existing_schema = self.client.schema.get("SDGArticle")
-                logger.info("SDGArticle schema already exists")
-            except weaviate.exceptions.UnexpectedStatusCodeException:
-                self.client.schema.create_class(sdg_article_schema)
-                logger.info("Created new SDGArticle schema")
-                
+            self.client.schema.create_class(sdg_article_schema)
+            logger.info("Created new SDGArticle schema with version validation")
+            
         except Exception as e:
             logger.error(f"Error setting up SDG schema: {e}")
-            # Fallback: Verwende Standard-Schema
             self._create_fallback_schema()
 
+    def _migrate_schema(self, old_version: str, new_version: str):
+        """Handle schema migration between versions"""
+        logger.info(f"Migrating schema from {old_version} to {new_version}")
+        
+        # Backup existing data
+        try:
+            backup_data = self.client.query.get("SDGArticle").do()
+            logger.info(f"Backed up {len(backup_data.get('data', {}).get('Get', {}).get('SDGArticle', []))} documents")
+        except Exception as e:
+            logger.error(f"Schema migration backup failed: {e}")
+            raise
+        
+        # Delete and recreate schema
+        try:
+            self.client.schema.delete_class("SDGArticle")
+            logger.info("Deleted old schema")
+        except Exception as e:
+            logger.warning(f"Could not delete old schema: {e}")
+
     def _create_fallback_schema(self):
+        """Create simple fallback schema"""
         simple_schema = {
             "class": "SDGArticle",
             "vectorizer": "none",
@@ -10502,9 +10788,12 @@ class VectorDBClient:
         ]
         
         for schema in schemas:
-            if not self.client.schema.exists(schema["class"]):
-                self.client.schema.create_class(schema)
-                logger.info(f"Created {schema['class']} schema")
+            try:
+                if not self.client.schema.exists(schema["class"]):
+                    self.client.schema.create_class(schema)
+                    logger.info(f"Created {schema['class']} schema")
+            except Exception as e:
+                logger.error(f"Failed to create {schema['class']} schema: {e}")
     
     async def insert_embeddings(self, 
                               documents: List[Dict[str, Any]], 
@@ -10659,10 +10948,14 @@ class VectorDBClient:
         try:
             stats = {}
             for class_name in self.sdg_classes:
-                if self.client.schema.exists(class_name):
-                    result = self.client.query.aggregate(class_name).with_meta_count().do()
-                    count = result.get("data", {}).get("Aggregate", {}).get(class_name, [{}])[0].get("meta", {}).get("count", 0)
-                    stats[class_name] = count
+                try:
+                    if self.client.schema.exists(class_name):
+                        result = self.client.query.aggregate(class_name).with_meta_count().do()
+                        count = result.get("data", {}).get("Aggregate", {}).get(class_name, [{}])[0].get("meta", {}).get("count", 0)
+                        stats[class_name] = count
+                except Exception as e:
+                    logger.warning(f"Could not get statistics for {class_name}: {e}")
+                    stats[class_name] = 0
             return stats
         except Exception as e:
             logger.error(f"Error getting statistics: {e}")

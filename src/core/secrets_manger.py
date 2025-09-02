@@ -52,18 +52,22 @@ class SecretsManager:
         return self.cipher.decrypt(encrypted.encode()).decode()
     
     def get_secret(self, key: str) -> str:
-        """Get decrypted secret from environment"""
-        encrypted_value = os.environ.get(f"{key}_ENCRYPTED")
-        if encrypted_value:
-            return self.decrypt_secret(encrypted_value)
-        
-        # Fallback to plaintext for development (with warning)
-        plaintext_value = os.environ.get(key)
-        if plaintext_value and os.environ.get('ENVIRONMENT') != 'production':
-            logger.warning(f"Using plaintext secret for {key} in development")
-            return plaintext_value
-        
-        raise ValueError(f"Secret {key} not found or not properly encrypted")
+        """Enhanced error handling"""
+        try:
+            encrypted_value = os.environ.get(f"{key}_ENCRYPTED")
+            if encrypted_value:
+                return self.decrypt_secret(encrypted_value)
+            
+            # Fallback für Development
+            plaintext_value = os.environ.get(key)
+            if plaintext_value and os.environ.get('ENVIRONMENT') != 'production':
+                logger.warning(f"Using plaintext secret for {key}")
+                return plaintext_value
+            
+            raise ValueError(f"Secret {key} not found")
+        except Exception as e:
+            logger.error(f"Error retrieving secret {key}: {e}")
+            raise
 
 # Initialize global secrets manager
 secrets_manager = SecretsManager()
