@@ -1,0 +1,26 @@
+Collecting keyring
+  Using cached keyring-25.6.0-py3-none-any.whl (39 kB)
+Collecting SecretStorage>=3.2
+  Using cached SecretStorage-3.3.3-py3-none-any.whl (15 kB)
+Collecting jeepney>=0.4.2
+  Using cached jeepney-0.9.0-py3-none-any.whl (49 kB)
+Collecting importlib_metadata>=4.11.4
+  Using cached importlib_metadata-8.7.0-py3-none-any.whl (27 kB)
+Collecting jaraco.classes
+  Using cached jaraco.classes-3.4.0-py3-none-any.whl (6.8 kB)
+Collecting jaraco.functools
+  Using cached jaraco_functools-4.3.0-py3-none-any.whl (10 kB)
+Collecting jaraco.context
+  Using cached jaraco.context-6.0.1-py3-none-any.whl (6.8 kB)
+Collecting zipp>=3.20
+  Using cached zipp-3.23.0-py3-none-any.whl (10 kB)
+Requirement already satisfied: cryptography>=2.0 in ./.venv/lib/python3.11/site-packages (from SecretStorage>=3.2->keyring) (45.0.6)
+Collecting more-itertools
+  Downloading more_itertools-10.8.0-py3-none-any.whl (69 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.7/69.7 kB 3.8 MB/s eta 0:00:00
+Collecting backports.tarfile
+  Using cached backports.tarfile-1.2.0-py3-none-any.whl (30 kB)
+Requirement already satisfied: cffi>=1.14 in ./.venv/lib/python3.11/site-packages (from cryptography>=2.0->SecretStorage>=3.2->keyring) (1.17.1)
+Requirement already satisfied: pycparser in ./.venv/lib/python3.11/site-packages (from cffi>=1.14->cryptography>=2.0->SecretStorage>=3.2->keyring) (2.22)
+Installing collected packages: zipp, more-itertools, jeepney, backports.tarfile, jaraco.functools, jaraco.context, jaraco.classes, importlib_metadata, SecretStorage, keyring
+Successfully installed SecretStorage-3.3.3 backports.tarfile-1.2.0 importlib_metadata-8.7.0 jaraco.classes-3.4.0 jaraco.context-6.0.1 jaraco.functools-4.3.0 jeepney-0.9.0 keyring-25.6.0 more-itertools-10.8.0 zipp-3.23.0

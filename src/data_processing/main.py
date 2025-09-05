@@ -3,18 +3,26 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 import time
+import datetime
 import json
+import numpy as np
 from sqlalchemy import create_engine, text
 from sentence_transformers import SentenceTransformer
 from faster_whisper import WhisperModel
 import re
 import logging
-from typing import Dict, Any
-
+import asyncio
+from typing import List, Dict, Any
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
 from core.db_utils import save_to_database
 from core.file_handler import FileHandler
 from core.processing_logic import ProcessingLogic
 from core.api_client import ApiClient
+
+# Add after existing imports - DEPENDENCY MANAGEMENT INTEGRATION
+from ..core.dependency_manager import dependency_manager, wait_for_dependencies, setup_sdg_dependencies
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,21 +38,38 @@ os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
+# Global services
+processing_logic = None
+whisper_model = None
+sentence_model = None
+file_handler = None
+api_client = None
+
+# Pydantic models for API endpoints
+class ProcessContentRequest(BaseModel):
+    content_items: List[Dict[str, Any]]
+
+class ProcessingResponse(BaseModel):
+    success: bool
+    processed_count: int
+    message: str
+
+# Initialize models with retry logic
 def initialize_models_with_retry():
     """Initialize AI models with retry logic and fallbacks"""
     max_retries = 3
     
     for attempt in range(max_retries):
         try:
-            # Whisper Model mit Fallback
+            # Whisper Model with fallback
             try:
                 whisper_model = WhisperModel("small", device="cpu")
                 logger.info("Whisper model loaded successfully")
             except Exception as e:
                 logger.warning(f"Whisper model loading failed: {e}")
-                whisper_model = None  # Fallback zu None
+                whisper_model = None  # Fallback to None
             
-            # Sentence Model (kritisch)
+            # Sentence Model (critical)
             sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
             logger.info("Sentence Transformer loaded successfully")
             
@@ -57,16 +82,215 @@ def initialize_models_with_retry():
                 raise
             time.sleep(2 ** attempt)  # Exponential backoff
 
-try:
-    whisper_model, sentence_model = initialize_models_with_retry()
-    logger.info("AI models initialization completed")
-except Exception as e:
-    logger.error(f"Critical error loading AI models: {e}")
-    exit(1)
+# SDG Semantic Chunker for large documents
+class SDGSemanticChunker:
+    def __init__(self, target_chunk_size=400, overlap_size=40):
+        self.target_chunk_size = target_chunk_size
+        self.overlap_size = overlap_size
+    
+    def smart_chunk(self, text: str, preserve_sdg_context=True) -> List[Dict[str, Any]]:
+        """Intelligently chunk text while preserving SDG context"""
+        sentences = re.split(r'[.!?]', text)
+        chunks = []
+        current_chunk = ""
+        current_size = 0
+        chunk_id = 0
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            sentence_size = len(sentence.split())
+            
+            if current_size + sentence_size > self.target_chunk_size and current_chunk:
+                # Create chunk with metadata
+                chunks.append({
+                    "chunk_id": chunk_id,
+                    "text": current_chunk.strip(),
+                    "word_count": current_size,
+                    "semantic_coherence": self._calculate_coherence(current_chunk),
+                    "sdg_density": self._calculate_sdg_density(current_chunk) if preserve_sdg_context else 0.5
+                })
+                
+                # Start new chunk with overlap
+                overlap_text = current_chunk.split()[-self.overlap_size:]
+                current_chunk = " ".join(overlap_text) + " " + sentence
+                current_size = len(overlap_text) + sentence_size
+                chunk_id += 1
+            else:
+                current_chunk += " " + sentence
+                current_size += sentence_size
+        
+        # Add final chunk
+        if current_chunk.strip():
+            chunks.append({
+                "chunk_id": chunk_id,
+                "text": current_chunk.strip(),
+                "word_count": current_size,
+                "semantic_coherence": self._calculate_coherence(current_chunk),
+                "sdg_density": self._calculate_sdg_density(current_chunk) if preserve_sdg_context else 0.5
+            })
+        
+        return chunks
+    
+    def _calculate_coherence(self, text: str) -> float:
+        """Simple coherence score based on sentence connectivity"""
+        sentences = text.split('.')
+        if len(sentences) < 2:
+            return 0.5
+        
+        # Simple heuristic: check for connecting words
+        connecting_words = ['however', 'therefore', 'furthermore', 'moreover', 'additionally', 'consequently']
+        connections = sum(1 for sentence in sentences for word in connecting_words if word in sentence.lower())
+        
+        return min(0.3 + (connections / len(sentences)), 1.0)
+    
+    def _calculate_sdg_density(self, text: str) -> float:
+        """Calculate SDG-related keyword density"""
+        sdg_keywords = ['sustainable', 'development', 'goal', 'target', 'poverty', 'hunger', 'health', 
+                       'education', 'gender', 'water', 'energy', 'growth', 'infrastructure', 
+                       'inequality', 'climate', 'ocean', 'biodiversity', 'peace', 'partnership']
+        
+        words = text.lower().split()
+        sdg_count = sum(1 for word in words if any(keyword in word for keyword in sdg_keywords))
+        
+        return min(sdg_count / len(words), 1.0) if words else 0.0
 
-file_handler = FileHandler(IMAGES_DIR)
-processing_logic = ProcessingLogic(whisper_model, sentence_model)
-api_client = ApiClient()
+# Initialize services
+def initialize_services():
+    """Initialize all services with proper error handling"""
+    global processing_logic, whisper_model, sentence_model, file_handler, api_client
+    
+    try:
+        whisper_model, sentence_model = initialize_models_with_retry()
+        processing_logic = ProcessingLogic(whisper_model, sentence_model)
+        file_handler = FileHandler(IMAGES_DIR)
+        api_client = ApiClient()
+        
+        logger.info("✅ All services initialized successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Service initialization failed: {e}")
+        return False
+
+# Enhanced document processing function
+def process_large_document(text_content: str, metadata: dict) -> dict:
+    """Process large documents with intelligent chunking"""
+    
+    word_count = len(text_content.split())
+    
+    if word_count <= 200:
+        # Small document - process normally
+        return processing_logic.process_text_for_ai(text_content)
+    
+    # Large document - use smart chunking
+    chunker = SDGSemanticChunker(target_chunk_size=400, overlap_size=40)
+    chunks = chunker.smart_chunk(text_content, preserve_sdg_context=True)
+    
+    # Process each chunk
+    processed_chunks = []
+    all_embeddings = []
+    
+    for chunk in chunks:
+        chunk_processed = processing_logic.process_text_for_ai(chunk["text"])
+        chunk.update(chunk_processed)
+        processed_chunks.append(chunk)
+        all_embeddings.append(chunk_processed["embeddings"])
+    
+    # Combine embeddings (weighted average by chunk quality)
+    weights = [chunk.get("semantic_coherence", 0.5) for chunk in processed_chunks]
+    if all_embeddings:
+        combined_embedding = np.average(all_embeddings, axis=0, weights=weights).tolist()
+    else:
+        combined_embedding = []
+    
+    return {
+        "chunks": processed_chunks,
+        "combined_embeddings": combined_embedding,
+        "total_chunks": len(processed_chunks),
+        "total_words": word_count,
+        "processing_method": "smart_semantic_chunking"
+    }
+
+# FastAPI lifespan management
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan management"""
+    # Startup
+    logger.info("🚀 Starting SDG Data Processing Service...")
+    
+    if not initialize_services():
+        logger.error("❌ Failed to initialize services")
+        raise RuntimeError("Service initialization failed")
+    
+    logger.info("✅ SDG Data Processing Service started successfully")
+    yield
+    
+    # Shutdown
+    logger.info("🔄 Shutting down SDG Data Processing Service...")
+    logger.info("✅ SDG Data Processing Service shutdown complete")
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(
+    title="SDG Data Processing Service",
+    description="Microservice for processing SDG-related content with AI models",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Enhanced health check with dependency status
+@app.get("/health")
+async def health_check():
+    """Enhanced health check with dependency status"""
+    from ..core.dependency_manager import get_dependency_status
+    
+    dependency_status = await get_dependency_status()
+    db_healthy = check_database_health()
+    
+    return {
+        "status": "healthy" if (processing_logic and db_healthy) else "unhealthy",
+        "service": "SDG Data Processing Service",
+        "version": "1.0.0",
+        "database": "connected" if db_healthy else "disconnected",
+        "models_loaded": {
+            "whisper": whisper_model is not None,
+            "sentence_transformer": sentence_model is not None,
+            "processing_logic": processing_logic is not None
+        },
+        "dependencies": dependency_status,
+        "timestamp": time.time()
+    }
+
+@app.post("/process-content", response_model=ProcessingResponse)
+async def process_content_endpoint(request: ProcessContentRequest):
+    """Process content items through the pipeline"""
+    try:
+        processed_count = 0
+        
+        for item in request.content_items:
+            content = item.get('content', '')
+            metadata = item.get('metadata', {})
+            
+            if len(content) > 1000:
+                processed_data = process_large_document(content, metadata)
+                save_to_database(metadata, content, processed_data['combined_embeddings'], processed_data.get('chunks'))
+            else:
+                processed_data = processing_logic.process_text_for_ai(content)
+                save_to_database(metadata, content, processed_data['embeddings'])
+            
+            processed_count += 1
+        
+        return ProcessingResponse(
+            success=True,
+            processed_count=processed_count,
+            message=f"Successfully processed {processed_count} content items"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def check_database_health():
     """Simple database health check"""
@@ -81,7 +305,7 @@ def check_database_health():
 
 def run_processing_worker():
     """Monitor RAW_DATA_DIR for new files and process them."""
-    logger.info("Starting Data Processing Service...")
+    logger.info("Starting Data Processing Worker...")
     global last_cleanup_timestamp
     
     while True:
@@ -99,7 +323,7 @@ def run_processing_worker():
                 
             json_files = [f for f in os.listdir(RAW_DATA_DIR) if f.endswith('.json')]
             if not json_files:
-                logger.info("No new metadata files found. Waiting...")
+                logger.debug("No new metadata files found. Waiting...")
                 time.sleep(30)
                 continue
 
@@ -128,9 +352,10 @@ def run_processing_worker():
                         logger.warning(f"No content extracted from {media_path}")
                         continue
                     
+                    # Use enhanced processing
                     if len(text_content) > 1000:
-                        processed_data = processing_logic.process_text_for_ai_with_chunking(text_content)
-                        save_to_database(metadata, text_content, processed_data['combined_embeddings'], processed_data['chunks'])
+                        processed_data = process_large_document(text_content, metadata)
+                        save_to_database(metadata, text_content, processed_data['combined_embeddings'], processed_data.get('chunks'))
                     else:
                         processed_data = processing_logic.process_text_for_ai(text_content)
                         save_to_database(metadata, text_content, processed_data['embeddings'])
@@ -139,10 +364,10 @@ def run_processing_worker():
 
                     os.remove(metadata_path)
                     os.remove(media_path)
-                    logger.info(f"Processing of {json_file_name} completed successfully")
+                    logger.info(f"✅ Processing of {json_file_name} completed successfully")
 
                 except Exception as e:
-                    logger.error(f"Error processing {json_file_name}: {e}")
+                    logger.error(f"❌ Error processing {json_file_name}: {e}")
                     time.sleep(5)
                     
         except KeyboardInterrupt:
@@ -195,11 +420,49 @@ def save_backup(metadata: dict, text_content: str, processed_data: dict, base_na
     backup_content = {
         "metadata": metadata,
         "text": text_content,
-        "processed_data": processed_data
+        "processed_data": processed_data,
+        "backup_timestamp": datetime.datetime.utcnow().isoformat()
     }
     with open(backup_path, 'w', encoding='utf-8') as f:
         json.dump(backup_content, f, indent=4, ensure_ascii=False)
     logger.info(f"Backup saved: {backup_path}")
 
+# Modified main function with dependency management
 if __name__ == "__main__":
-    run_processing_worker()
+    import threading
+    import uvicorn
+    
+    async def start_with_dependencies():
+        """Start service with dependency management"""
+        logger.info("🚀 Starting Data Processing Service...")
+        
+        # Setup dependencies
+        setup_sdg_dependencies()
+        
+        # Register processing-specific startup tasks
+        async def initialize_processing_dependencies():
+            """Initialize data processing dependencies"""
+            await wait_for_dependencies("database", "weaviate", "data_retrieval")
+            
+            # Initialize models with dependency validation
+            global processing_logic
+            if not processing_logic:
+                whisper_model, sentence_model = initialize_models_with_retry()
+                processing_logic = ProcessingLogic(whisper_model, sentence_model)
+            
+            logger.info("✅ Data processing dependencies initialized")
+        
+        dependency_manager.register_startup_task("data_processing", initialize_processing_dependencies)
+        
+        # Start dependency manager
+        await dependency_manager.start_all_services()
+        
+        # Start the worker in background
+        worker_thread = threading.Thread(target=run_processing_worker, daemon=True)
+        worker_thread.start()
+        
+        # Start FastAPI
+        uvicorn.run("main:app", host="0.0.0.0", port=8001)
+    
+    # Run with dependency management
+    asyncio.run(start_with_dependencies())

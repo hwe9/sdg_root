@@ -3,11 +3,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from ..core.secrets_manager import secrets_manager
-
+from ..core.dependency_manager import get_dependency_manager
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 def get_database_url():
     """Get database URL with encrypted credentials"""
@@ -51,22 +50,16 @@ engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
-    """Database session dependency with proper error handling"""
-    db = SessionLocal()
-    try:
-        yield db
-    except Exception as e:
-        logger.error(f"Database session error: {e}")
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    """Get database session via dependency manager"""
+    dep_manager = get_dependency_manager()
+    return dep_manager.get_database_session()
 
 def check_database_health():
     """Check if database is accessible"""
     try:
-        with engine.connect() as conn:
-            conn.execute("SELECT 1")
+        dep_manager = get_dependency_manager()
+        with dep_manager.get_database_session() as session:
+            session.execute("SELECT 1")
         return True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")

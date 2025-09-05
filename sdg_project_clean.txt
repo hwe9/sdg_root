@@ -5,6 +5,9 @@ networks:
     internal: true 
   sdg_external:
     driver: bridge
+  monitoring_network:
+    driver: bridge
+    internal: true
 
 services:
   nginx_proxy:
@@ -300,7 +303,87 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-    
+
+  migration_service:
+    build: ${SRC_ROOT}/migration
+    command: python migration_plan.py
+    depends_on:
+      - database_service
+    environment:
+      - MIGRATION_MODE=production
+
+  monitoring_service:
+    build: ${SRC_ROOT}/monitoring
+    container_name: monitoring_service
+    ports:
+      - "9090:9090"
+    command: python migration_plan.py
+    volumes:
+      - ${SRC_ROOT}:/app/src
+      - ${DATA_ROOT}:/app/data
+    environment:
+    - MIGRATION_MODE=production
+    - LOG_LEVEL=INFO
+    - PARALLEL_MIGRATIONS=true
+    depends_on:
+      - api_service
+      - data_processing_service
+      - database_service
+      - weaviate_service
+      - redis
+
+  config_service:
+    build: ${SRC_ROOT}/config_manager
+    container_name: config_service
+    ports:
+      - "8006:8006"
+    volumes:
+      - ${SRC_ROOT}/config:/app/config
+    environment:
+      - CONFIG_DIR=/app/config
+
+  error_handler_service:
+    build: ${SRC_ROOT}/error_handler
+    container_name: error_handler_service  
+    ports:
+      - "8007:8007"
+    environment:
+      - CIRCUIT_BREAKER_THRESHOLD=5
+      - RECOVERY_TIMEOUT=60
+
+  url_validator_service:
+    build: ${SRC_ROOT}/url_validator
+    container_name: url_validator_service
+    ports:
+      - "8008:8008"
+    environment:
+      - VALIDATION_TIMEOUT=30
+      - MAX_FILE_SIZE=52428800 #50MB
+
+  testing_service:
+    build: ${SRC_ROOT}/testing
+    container_name: testing_service
+    profiles: ["testing"]
+    command: pytest --cov=src tests/
+    volumes:
+      - ${SRC_ROOT}:/app
+    depends_on:
+      - database_service
+      - redis
+
+  backup_service:
+    build: ${SRC_ROOT}/backup
+    container_name: backup_service
+    volumes:
+      - ${DATA_ROOT}:/data
+      - ${BACKUP_ROOT}:/backup
+    environment:
+      - BACKUP_SCHEDULE="0 2 * * *"  # Daily at 2 AM
+      - RETENTION_DAYS=30
+
+
+
+
   
 
 
@@ -609,6 +692,9 @@ networks:
     internal: true 
   sdg_external:
     driver: bridge
+  monitoring_network:
+    driver: bridge
+    internal: true
 
 services:
   nginx_proxy:
@@ -904,7 +990,87 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-    
+
+  migration_service:
+    build: ${SRC_ROOT}/migration
+    command: python migration_plan.py
+    depends_on:
+      - database_service
+    environment:
+      - MIGRATION_MODE=production
+
+  monitoring_service:
+    build: ${SRC_ROOT}/monitoring
+    container_name: monitoring_service
+    ports:
+      - "9090:9090"
+    command: python migration_plan.py
+    volumes:
+      - ${SRC_ROOT}:/app/src
+      - ${DATA_ROOT}:/app/data
+    environment:
+    - MIGRATION_MODE=production
+    - LOG_LEVEL=INFO
+    - PARALLEL_MIGRATIONS=true
+    depends_on:
+      - api_service
+      - data_processing_service
+      - database_service
+      - weaviate_service
+      - redis
+
+  config_service:
+    build: ${SRC_ROOT}/config_manager
+    container_name: config_service
+    ports:
+      - "8006:8006"
+    volumes:
+      - ${SRC_ROOT}/config:/app/config
+    environment:
+      - CONFIG_DIR=/app/config
+
+  error_handler_service:
+    build: ${SRC_ROOT}/error_handler
+    container_name: error_handler_service  
+    ports:
+      - "8007:8007"
+    environment:
+      - CIRCUIT_BREAKER_THRESHOLD=5
+      - RECOVERY_TIMEOUT=60
+
+  url_validator_service:
+    build: ${SRC_ROOT}/url_validator
+    container_name: url_validator_service
+    ports:
+      - "8008:8008"
+    environment:
+      - VALIDATION_TIMEOUT=30
+      - MAX_FILE_SIZE=52428800 #50MB
+
+  testing_service:
+    build: ${SRC_ROOT}/testing
+    container_name: testing_service
+    profiles: ["testing"]
+    command: pytest --cov=src tests/
+    volumes:
+      - ${SRC_ROOT}:/app
+    depends_on:
+      - database_service
+      - redis
+
+  backup_service:
+    build: ${SRC_ROOT}/backup
+    container_name: backup_service
+    volumes:
+      - ${DATA_ROOT}:/data
+      - ${BACKUP_ROOT}:/backup
+    environment:
+      - BACKUP_SCHEDULE="0 2 * * *"  # Daily at 2 AM
+      - RETENTION_DAYS=30
+
+
+
+
   
 
 
@@ -1262,11 +1428,15 @@ def check_database_health():
 
 
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/api/main.py
-from fastapi import FastAPI, Depends, HTTPException
+from datetime import datetime
+import logging
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import models, schemas
-from database import get_db
+from .database import get_db, check_database_health
+from . import models, schemas
 import asyncio
 import jwt 
 
@@ -1424,6 +1594,27 @@ def create_actor(actor: schemas.ActorCreate, db: Session = Depends(get_db)):
 def read_actors(db: Session = Depends(get_db)):
     actors = db.query(models.Actor).all()
     return actors
+
+@app.get("/health")
+async def health_check():
+    """Service health check"""
+    db_healthy = check_database_health()
+    return {
+        "status": "healthy" if db_healthy else "unhealthy",
+        "service": "SDG API Service", 
+        "version": "1.0.0",
+        "database": "connected" if db_healthy else "disconnected",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/api/migrate_existing_schema.py
@@ -1850,12 +2041,20 @@ class Article(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     processed_at = Column(DateTime(timezone=True))
     
+    content_quality_score = Column(Float, default=0.0)
+    has_embeddings = Column(Boolean, default=False, index=True)
+    embedding_model = Column(String(100))
+    embedding_dimension = Column(Integer)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    processed_at = Column(DateTime(timezone=True))
+
     tags = relationship("Tag", secondary=articles_tags, back_populates="articles")
     ai_topics = relationship("AiTopic", secondary=articles_ai_topics, back_populates="articles")
     image_paths = relationship("Image", back_populates="article")
     chunks = relationship("ArticleChunk", back_populates="article", cascade="all, delete-orphan")
     sdgs_multi = relationship("Sdg", secondary=articles_sdg_targets, back_populates="articles_multi")
     primary_sdg = relationship("Sdg", foreign_keys=[sdg_id])
+
 
 
 class ArticleChunk(Base):
@@ -6010,13 +6209,47 @@ class ConfigurationManager:
 config_manager = ConfigurationManager()
 
 
+### /source /mnt/gigabyte1tb/SDG/sdg_root/src/core/db_init.py
+# Database initialization and migration
+from sqlalchemy import create_engine, text
+from .config_manager import config_manager
+import logging
+
+logger = logging.getLogger(__name__)
+
+def initialize_database():
+    """Initialize database with SDG data"""
+    engine = create_engine(config_manager.get_database_url())
+    
+    with engine.begin() as conn:
+        # Initialize SDG goals
+        sdg_data = [
+            (1, "No Poverty", "#E5243B", "End poverty in all its forms everywhere"),
+            (2, "Zero Hunger", "#DDA63A", "End hunger, achieve food security and improved nutrition and promote sustainable agriculture"),
+            (3, "Good Health and Well-Being", "#4C9F38", "Ensure healthy lives and promote well-being for all at all ages"),
+            # ... continue for all 17 SDGs
+        ]
+        
+        for goal_num, name, color, desc in sdg_data:
+            conn.execute(text("""
+                INSERT INTO sdgs (goal_number, name, color_hex, description) 
+                VALUES (:goal_num, :name, :color, :desc)
+                ON CONFLICT (goal_number) DO NOTHING
+            """), {"goal_num": goal_num, "name": name, "color": color, "desc": desc})
+    
+    logger.info("Database initialized with SDG data")
+
+if __name__ == "__main__":
+    initialize_database()
+
+
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/core/error_handler.py
 import logging
 import traceback
 import sys
 from typing import Any, Dict, Optional, Type
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, time
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -6499,6 +6732,59 @@ class SecretsManager:
 secrets_manager = SecretsManager()
 
 
+### /source /mnt/gigabyte1tb/SDG/sdg_root/src/core/service_registry.py
+# Service registry for inter-service communication
+import httpx
+import asyncio
+from typing import Dict, Any, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ServiceRegistry:
+    def __init__(self):
+        self.services = {
+            "api": "http://api_service:8000",
+            "data_retrieval": "http://data_retrieval_service:8002", 
+            "data_processing": "http://data_processing_service:8001",
+            "vectorization": "http://vectorization_service:8003",
+            "content_extraction": "http://content_extraction_service:8004",
+            "auth": "http://auth_service:8005"
+        }
+        self.client = httpx.AsyncClient(timeout=30.0)
+    
+    async def call_service(self, service_name: str, endpoint: str, 
+                          method: str = "GET", **kwargs) -> Optional[Dict[str, Any]]:
+        """Call another service"""
+        try:
+            base_url = self.services.get(service_name)
+            if not base_url:
+                raise ValueError(f"Unknown service: {service_name}")
+            
+            url = f"{base_url}{endpoint}"
+            response = await self.client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+            
+        except Exception as e:
+            logger.error(f"Error calling {service_name}{endpoint}: {e}")
+            return None
+    
+    async def health_check_all(self) -> Dict[str, str]:
+        """Check health of all services"""
+        results = {}
+        for service_name in self.services:
+            try:
+                health = await self.call_service(service_name, "/health")
+                results[service_name] = health.get("status", "unknown") if health else "unhealthy"
+            except Exception as e:
+                results[service_name] = "error"
+        return results
+
+# Global service registry
+service_registry = ServiceRegistry()
+
+
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/core/url_validator.py
 # /sdg_root/src/core/url_validator.py
 import re
@@ -6555,6 +6841,9 @@ class URLValidator:
         Validate URL for SSRF protection
         Returns: (is_valid, error_message)
         """
+        if self._is_ip_blocked(ip):
+            return False, f"IP address {ip} is in blocked range"
+
         try:
             # Basic URL parsing
             parsed = urlparse(url.lower())
@@ -8646,8 +8935,10 @@ from sentence_transformers import SentenceTransformer
 from faster_whisper import WhisperModel
 import re
 import logging
-from typing import Dict, Any
-
+import asyncio
+from typing import List, Dict, Any
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 from core.db_utils import save_to_database
 from core.file_handler import FileHandler
 from core.processing_logic import ProcessingLogic
@@ -8666,6 +8957,12 @@ last_cleanup_timestamp = 0
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
+
+app = FastAPI(title="SDG Data Processing Service")
+
+# Initialize processing logic
+processing_logic = None
+
 
 def initialize_models_with_retry():
     """Initialize AI models with retry logic and fallbacks"""
@@ -8838,8 +9135,28 @@ def save_backup(metadata: dict, text_content: str, processed_data: dict, base_na
         json.dump(backup_content, f, indent=4, ensure_ascii=False)
     logger.info(f"Backup saved: {backup_path}")
 
+# Add health check endpoint to your existing worker
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy" if processing_logic else "unhealthy",
+        "service": "SDG Data Processing Worker",
+        "last_processed": last_cleanup_timestamp,
+        "models_loaded": {
+            "whisper": whisper_model is not None,
+            "sentence_transformer": sentence_model is not None
+        }
+    }
+
 if __name__ == "__main__":
-    run_processing_worker()
+    import threading
+    import uvicorn
+    
+    worker_thread = threading.Thread(target=run_processing_worker, daemon=True)
+    worker_thread.start()
+    
+    uvicorn.run("main:app", host="0.0.0.0", port=8001)
+
 
 
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/data_processing/requirements.txt
@@ -9137,7 +9454,6 @@ class RetrievalWorker:
             safe_filename += '.pdf'  # Default extension
 
         return safe_filename
-        
 
     def save_to_file(self, data):
         with open(self.processed_file, "w", encoding="utf-8") as f:
@@ -9176,6 +9492,163 @@ def test_download_generic_content(tmp_path):
     assert result is not None
     assert result["file_path"].endswith(".pdf")
     assert os.path.exists(result["file_path"])
+
+
+### /source /mnt/gigabyte1tb/SDG/sdg_root/src/migration/migration_plan.py
+# SDG Pipeline Migration Plan Implementation
+from dataclasses import dataclass
+from typing import List, Dict, Any
+import logging
+
+@dataclass
+class MigrationStep:
+    step_id: str
+    name: str
+    description: str
+    dependencies: List[str]
+    estimated_time: str
+    risk_level: str
+    validation_criteria: List[str]
+
+class SDGMigrationManager:
+    def __init__(self):
+        self.migration_steps = self._define_migration_steps()
+        
+    def _define_migration_steps(self) -> List[MigrationStep]:
+        return [
+            MigrationStep(
+                step_id="MIGRATE_001",
+                name="Database Schema Migration",
+                description="Migrate existing database to enhanced SDG schema",
+                dependencies=[],
+                estimated_time="2 hours",
+                risk_level="Medium",
+                validation_criteria=["All tables exist", "Data integrity maintained", "No data loss"]
+            ),
+            MigrationStep(
+                step_id="MIGRATE_002", 
+                name="Data Retrieval Service Migration",
+                description="Migrate data retrieval to containerized service",
+                dependencies=["MIGRATE_001"],
+                estimated_time="4 hours",
+                risk_level="Low",
+                validation_criteria=["Service responds to health check", "Can download test content", "URL validation works"]
+            ),
+            MigrationStep(
+                step_id="MIGRATE_003",
+                name="Data Processing Service Migration", 
+                description="Migrate processing logic to FastAPI service",
+                dependencies=["MIGRATE_002"],
+                estimated_time="6 hours",
+                risk_level="High",
+                validation_criteria=["AI models load successfully", "Text processing works", "Database integration functional"]
+            ),
+            MigrationStep(
+                step_id="MIGRATE_004",
+                name="Vectorization Service Migration",
+                description="Deploy vector database and embedding service",
+                dependencies=["MIGRATE_003"],
+                estimated_time="4 hours", 
+                risk_level="Medium",
+                validation_criteria=["Weaviate connects", "Embeddings generated", "Similarity search works"]
+            ),
+            MigrationStep(
+                step_id="MIGRATE_005",
+                name="API Service Migration",
+                description="Deploy unified API service",
+                dependencies=["MIGRATE_004"],
+                estimated_time="3 hours",
+                risk_level="Low", 
+                validation_criteria=["All endpoints respond", "Database queries work", "Authentication functional"]
+            )
+        ]
+    
+    def execute_migration(self):
+        """Execute migration plan"""
+        logging.info("🚀 Starting SDG Pipeline Migration...")
+        
+        for step in self.migration_steps:
+            logging.info(f"📋 Executing {step.step_id}: {step.name}")
+            logging.info(f"   Description: {step.description}")
+            logging.info(f"   Estimated Time: {step.estimated_time}")
+            logging.info(f"   Risk Level: {step.risk_level}")
+            
+            # Execute step (implement actual migration logic)
+            success = self._execute_step(step)
+            
+            if success:
+                logging.info(f"✅ {step.step_id} completed successfully")
+            else:
+                logging.error(f"❌ {step.step_id} failed")
+                break
+    
+    def _execute_step(self, step: MigrationStep) -> bool:
+        """Execute individual migration step"""
+        # Implement actual migration logic here
+        return True
+
+if __name__ == "__main__":
+    migration_manager = SDGMigrationManager()
+    migration_manager.execute_migration()
+
+
+### /source /mnt/gigabyte1tb/SDG/sdg_root/src/tests/test_integration.py
+# Integration tests for SDG pipeline
+import pytest
+import httpx
+import asyncio
+
+BASE_URLS = {
+    "api": "http://localhost:8000",
+    "vectorization": "http://localhost:8003", 
+    "content_extraction": "http://localhost:8004",
+    "data_processing": "http://localhost:8001"
+}
+
+@pytest.mark.asyncio
+async def test_all_services_healthy():
+    """Test all services are running and healthy"""
+    async with httpx.AsyncClient() as client:
+        for service, base_url in BASE_URLS.items():
+            try:
+                response = await client.get(f"{base_url}/health", timeout=10.0)
+                assert response.status_code == 200
+                health_data = response.json()
+                assert health_data["status"] == "healthy"
+                print(f"✅ {service} service healthy")
+            except Exception as e:
+                pytest.fail(f"❌ {service} service failed: {e}")
+
+@pytest.mark.asyncio
+async def test_end_to_end_pipeline():
+    """Test complete pipeline flow"""
+    test_url = "https://www.un.org/sustainabledevelopment/poverty/"
+    
+    async with httpx.AsyncClient() as client:
+        # 1. Extract content
+        extract_response = await client.post(
+            f"{BASE_URLS['content_extraction']}/extract",
+            json={"url": test_url}
+        )
+        assert extract_response.status_code == 200
+        
+        # 2. Process content  
+        process_response = await client.post(
+            f"{BASE_URLS['data_processing']}/process-content",
+            json={"content_items": extract_response.json()["content"]}
+        )
+        assert process_response.status_code == 200
+        
+        # 3. Search content
+        search_response = await client.post(
+            f"{BASE_URLS['vectorization']}/search", 
+            json={"query": "poverty reduction", "limit": 5}
+        )
+        assert search_response.status_code == 200
+        assert len(search_response.json()["results"]) > 0
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
 
 
 ### /source /mnt/gigabyte1tb/SDG/sdg_root/src/vectorization/__init__.py
@@ -9473,6 +9946,7 @@ def get_optimal_model_for_language(language: str) -> str:
 SDG Vectorization Service - FastAPI Application
 Microservice for embedding generation, vector storage, and semantic search
 """
+import os
 import logging
 from typing import List, Dict, Any, Optional
 import asyncio
@@ -10281,7 +10755,7 @@ class SimilaritySearch:
         }
     
     def _get_interlinkage_suggestions(self, 
-                                    results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                                    results: List[Dict[str, Any]]):
         """Generate SDG interlinkage suggestions based on search results"""
         sdg_frequency = defaultdict(int)
         

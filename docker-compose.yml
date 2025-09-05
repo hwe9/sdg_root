@@ -2,12 +2,23 @@ networks:
   sdg_internal:
     driver: bridge
     internal: true 
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
   sdg_external:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/16
+  monitoring_network:
+    driver: bridge
+    internal: true
 
 services:
   nginx_proxy:
-    image: nginx:alpine
+    image: nginx:1.25-alpine
     container_name: nginx_proxy
     ports:
       - "80:80"
@@ -15,12 +26,30 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/ssl/certs:ro
+      - ./nginx/logs:/var/log/nginx
     networks:
       - sdg_external
       - sdg_internal
     depends_on:
-      - auth_service
-      - api_service
+      auth_service:
+        condition: service_healthy
+      api_service:
+        condition: service_healthy
+    environment:
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   auth_service:
     build: ${SRC_ROOT}/auth
@@ -34,6 +63,9 @@ services:
         - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
         - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
         - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+        - DEPENDENCY_MANAGER_ENABLED=true
+        - HEALTH_CHECK_INTERVAL=60
+        - MAX_STARTUP_TIME=300
     networks:
       - sdg_internal
     depends_on:
@@ -43,8 +75,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 15s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -52,40 +85,83 @@ services:
           memory: '512M'
 
   api_service:
-    build: ${SRC_ROOT}/api
+    build: 
+      context: ${SRC_ROOT}/api
+      dockerfile: Dockerfile
+      args:
+        - BUILD_ENV=production
     container_name: api_service
+    restart: unless-stopped
     expose:
       - "8000"
     volumes:
-      - ${SRC_ROOT}/api:/app
+      - ${SRC_ROOT}/api:/app:ro
     environment:
-      - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - WEAVIATE_URL=${WEAVIATE_URL}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LOG_LEVEL=INFO
+      - WORKERS=4
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     networks:
       - sdg_internal
     depends_on:
       database_service:
         condition: service_healthy
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      auth_service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      gunicorn main:app 
+      --bind 0.0.0.0:8000 
+      --workers 4 
+      --worker-class uvicorn.workers.UvicornWorker
+      --max-requests 1000 
+      --max-requests-jitter 100
+      --preload
+      --access-logfile -
+      --error-logfile -
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 15s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
           cpus: '1.0'
+          memory: 1G
 
   database_service:
     image: postgres:16-alpine
     container_name: database_service
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-sdg_pipeline}
-      - POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8"
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --locale=en_US.UTF-8
+      - POSTGRES_SHARED_PRELOAD_LIBRARIES=pg_stat_statements
+      - POSTGRES_MAX_CONNECTIONS=200
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1GB
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     volumes:
       - ${DATABASE_SERVICE_VOLUMES}
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/backup:/backup
+    networks:
+      - sdg_internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -95,44 +171,58 @@ services:
     deploy:
       resources:
         limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
           cpus: '1.0'
+          memory: 2G
 
   weaviate_service:
-    # profiles: ["vector"]
-    image: semitechnologies/weaviate:1.24.1
+    image: semitechnologies/weaviate:1.32.2
     container_name: weaviate_service
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - QUERY_DEFAULTS_LIMIT=25
-      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
-      - DEFAULT_VECTORIZER_MODULE=text2vec-transformers
-      - ENABLE_MODULES=text2vec-transformers
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=false
+      - AUTHENTICATION_APIKEY_ENABLED=true
+      - AUTHENTICATION_APIKEY_ALLOWED_KEYS=${WEAVIATE_API_KEY}
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_MODULES=text2vec-openai,qna-openai
       - TRANSFORMERS_INFERENCE_API=http://weaviate_transformer_service:8080
       - PERSISTENCE_DATA_PATH=/var/lib/weaviate
       - CLUSTER_HOSTNAME=node1
       - MODULES_CLIENT_TIMEOUT=600s
+      - LIMIT_RESOURCES=true
+      - GOMEMLIMIT=3GiB
+      - GOGC=100
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     volumes:
       - ${WEAVIATE_SERVICE_VOLUMES}
+    networks:
+      - sdg_internal
     healthcheck:
       test: ["CMD-SHELL", "wget --spider --quiet http://localhost:8080/v1/meta || exit 1"] 
       interval: 30s
       timeout: 20s
       retries: 20
-      start_period: 600s
+      start_period: 300s
     depends_on:
       weaviate_transformer_service:
         condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: '2.0'    
-          memory: '4G'   
+          cpus: '4.0'    
+          memory: '6G'   
         reservations:
-          memory: '2G'
+          cpus: '2.0'
+          memory: '3G'
     
   weaviate_transformer_service:
-    # profiles: ["vector"]
     image: ${WEAVIATE_IMAGE}
     container_name: weaviate_transformer_service
     ports:
@@ -141,6 +231,9 @@ services:
       - ENABLE_GPU=0
       - TORCH_NUM_THREADS=4               
       - OMP_NUM_THREADS=4
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/.well-known/ready\").read()' || exit 1"]
       interval: 45s
@@ -165,12 +258,22 @@ services:
     environment:
       - WEAVIATE_URL=${WEAVIATE_URL}
       - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     depends_on:
       weaviate_service:
         condition: service_healthy
     command: python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
 
-  
   data_retrieval_service:
     build: ${SRC_ROOT}/data_retrieval
     container_name: data_retrieval_service
@@ -183,17 +286,25 @@ services:
     environment:
       - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL}
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     depends_on:
       database_service:
         condition: service_healthy
     command: python main.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
           cpus: '1.0'
 
   data_processing_service:
-    # profiles: ["processing"]
     build: ${SRC_ROOT}/data_processing
     container_name: data_processing_service
     ports:
@@ -206,16 +317,25 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - WEAVIATE_URL=${WEAVIATE_URL}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     depends_on:
-      data_retrieval_service:
-        condition: service_started
       database_service:
         condition: service_healthy
       weaviate_service:
         condition: service_healthy
-      weaviate_transformer_service:
+      data_retrieval_service:
         condition: service_healthy
     command: python main.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 45s
+      timeout: 20s
+      retries: 5
+      start_period: 120s
     deploy:
       resources:
         limits:
@@ -226,30 +346,35 @@ services:
           memory: '3G'
   
   content_extraction_service:
-  build: ${SRC_ROOT}/content_extraction
-  container_name: content_extraction_service
-  ports:
-    - "8004:8004"
-  volumes:
-    - ${SRC_ROOT}/content_extraction:/app
-  environment:
-    - DATABASE_URL=${DATABASE_URL}
-    - DATA_PROCESSING_URL=http://data_processing_service:8001
-    - API_SERVICE_URL=http://api_service:8000
-  depends_on:
-    database_service:
-      condition: service_healthy
-  command: python -m uvicorn main:app --host 0.0.0.0 --port 8004 --reload
-  deploy:
-    resources:
-      limits:
-        cpus: '1.0'
-        memory: '2G'
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
+    build: ${SRC_ROOT}/content_extraction
+    container_name: content_extraction_service
+    ports:
+      - "8004:8004"
+    volumes:
+      - ${SRC_ROOT}/content_extraction:/app
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - WEAVIATE_URL=${WEAVIATE_URL}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+    depends_on:
+      database_service:
+        condition: service_healthy
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8004 --reload
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: '2G'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
 
   pgadmin_service:
     image: dpage/pgadmin4:latest
@@ -261,6 +386,9 @@ services:
       - PGADMIN_DEFAULT_PASSWORD=${POSTGRES_PASSWORD}
       - PGADMIN_CONFIG_SERVER_MODE=False
       - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     volumes:
       - ${PGADMIN_VOLUMES}
     depends_on:
@@ -281,6 +409,9 @@ services:
       - "3001:3000"
     environment:
       - WEAVIATE_HOST=weaviate_service:8080
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     depends_on:
       weaviate_service:
         condition: service_healthy
@@ -293,12 +424,139 @@ services:
   
   redis:
     image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+     - sdg_internal
+    environment:
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+    command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-    
-  
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
+  migration_service:
+    build: ${SRC_ROOT}/migration
+    command: python migration_plan.py
+    depends_on:
+      database_service:
+        condition: service_healthy
+    environment:
+      - MIGRATION_MODE=production
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+
+  monitoring_service:
+    build: ${SRC_ROOT}/monitoring
+    container_name: monitoring_service
+    ports:
+      - "9090:9090"
+    command: python migration_plan.py
+    volumes:
+      - ${SRC_ROOT}:/app/src
+      - ${DATA_ROOT}:/app/data
+    environment:
+      - MIGRATION_MODE=production
+      - LOG_LEVEL=INFO
+      - PARALLEL_MIGRATIONS=true
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+    depends_on:
+      - api_service
+      - data_processing_service
+      - database_service
+      - weaviate_service
+      - redis
+
+  config_service:
+    build: ${SRC_ROOT}/config_manager
+    container_name: config_service
+    ports:
+      - "8006:8006"
+    volumes:
+      - ${SRC_ROOT}/config:/app/config
+    environment:
+      - CONFIG_DIR=/app/config
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+
+  error_handler_service:
+    build: ${SRC_ROOT}/error_handler
+    container_name: error_handler_service  
+    ports:
+      - "8007:8007"
+    environment:
+      - CIRCUIT_BREAKER_THRESHOLD=5
+      - RECOVERY_TIMEOUT=60
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+
+  url_validator_service:
+    build: ${SRC_ROOT}/url_validator
+    container_name: url_validator_service
+    ports:
+      - "8008:8008"
+    environment:
+      - VALIDATION_TIMEOUT=30
+      - MAX_FILE_SIZE=52428800 #50MB
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+
+  testing_service:
+    build: ${SRC_ROOT}/testing
+    container_name: testing_service
+    profiles: ["testing"]
+    command: pytest --cov=src tests/
+    volumes:
+      - ${SRC_ROOT}:/app
+    environment:
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+    depends_on:
+      database_service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  backup_service:
+    build: ${SRC_ROOT}/backup
+    container_name: backup_service
+    volumes:
+      - ${DATA_ROOT}:/data
+      - ${BACKUP_ROOT}:/backup
+    environment:
+      - BACKUP_SCHEDULE="0 2 * * *"  # Daily at 2 AM
+      - RETENTION_DAYS=30
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
+
+volumes:
+  redis_data:
+    driver: local
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  weaviate_api_key:
+    file: ./secrets/weaviate_api_key.txt

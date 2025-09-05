@@ -1,11 +1,25 @@
-weaviate-client>=4.0.0
-requests
-yt-dlp
-sentence-transformers
-faster-whisper
-PyPDF2
-python-docx
-sqlalchemy
-psycopg2-binary
-pytest
+# Enhanced Data Retrieval Service Requirements
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+aiohttp==3.9.1
+aiofiles==23.2.1
+python-multipart==0.0.6
+
+# Content processing
+yt-dlp==2023.12.30
+feedparser==6.0.10
+python-magic==0.4.27
+
+# Database & storage
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.7
+
+# Security & validation
+cryptography>=41.0.0
+python-dotenv==1.0.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
 

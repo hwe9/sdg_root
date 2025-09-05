@@ -6,7 +6,7 @@ import json
 import weaviate
 from contextlib import contextmanager
 from sqlalchemy import create_engine, text, MetaData, Table
-from sqlalchemy.exc import OperationalError, IntegrityError
+from sqlalchemy.exc import OperationalError, IntegrityError, DisconnectionError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 from typing import Dict, Any, List, Optional, Union
@@ -15,7 +15,8 @@ try:
 except ImportError:
     from ..core.secrets_manager import secrets_manager
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from ...core.dependency_manager import get_dependency_manager
 import hashlib
 
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +34,15 @@ DATABASE_URL = get_database_url()
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
 
 def get_database_engine():
-    """Create robust database engine with connection pooling"""
+    """Create robust database engine with dependency validation"""
+    # Import dependency_manager as specified in requirements
+    from ...core.dependency_manager import dependency_manager
+    
+    # Check if we should wait for dependencies
+    if hasattr(dependency_manager, '_startup_complete') and not dependency_manager._startup_complete.is_set():
+        logger.info("Waiting for database dependencies...")
+        # In production, you might want to implement a sync wait here
+    
     engine_kwargs = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
@@ -47,22 +56,21 @@ def get_database_engine():
         }
     }
     
-    engine = create_engine(
-        DATABASE_URL, 
-        pool_size=20,           
-        max_overflow=30,        
-        pool_pre_ping=True,
-        pool_recycle=1800
-        
-    )
+    engine = create_engine(DATABASE_URL, **engine_kwargs)
     
-    # Test connection
+    # Test connection with dependency awareness
     max_retries = 3
     for attempt in range(max_retries):
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             logger.info("Database connection established successfully")
+            
+            # Update dependency status if manager is available
+            if hasattr(dependency_manager, 'service_status') and 'database' in dependency_manager.service_status:
+                from ...core.dependency_manager import ServiceStatus
+                dependency_manager.service_status['database'] = ServiceStatus.HEALTHY
+            
             break
         except (OperationalError, DisconnectionError) as e:
             if attempt < max_retries - 1:
@@ -70,10 +78,43 @@ def get_database_engine():
                 time.sleep(2 ** attempt)  # Exponential backoff
             else:
                 logger.error(f"Failed to establish database connection after {max_retries} attempts")
+                # Update dependency status to failed
+                if hasattr(dependency_manager, 'service_status') and 'database' in dependency_manager.service_status:
+                    from ...core.dependency_manager import ServiceStatus
+                    dependency_manager.service_status['database'] = ServiceStatus.FAILED
                 raise
     
     return engine
 
+def check_database_health() -> bool:
+    """Check database health with dependency status update"""
+    from ...core.dependency_manager import dependency_manager
+    
+    try:
+        engine = get_database_engine()
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        
+        # Update dependency status
+        if hasattr(dependency_manager, 'service_status') and 'database' in dependency_manager.service_status:
+            from ...core.dependency_manager import ServiceStatus
+            dependency_manager.service_status['database'] = ServiceStatus.HEALTHY
+        
+        return True
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        
+        # Update dependency status
+        if hasattr(dependency_manager, 'service_status') and 'database' in dependency_manager.service_status:
+            from ...core.dependency_manager import ServiceStatus
+            dependency_manager.service_status['database'] = ServiceStatus.UNHEALTHY
+        
+        return False
+
+def get_database_session():
+    """Get database session via dependency manager"""
+    dep_manager = get_dependency_manager()
+    return dep_manager.get_database_session()
 
 @contextmanager
 def get_db_connection():
@@ -97,7 +138,6 @@ def get_db_connection():
             logger.error(f"Unexpected database error: {e}")
             raise
 
-
 def get_weaviate_client():
     """Create and return Weaviate client instance"""
     try:
@@ -117,7 +157,7 @@ def _create_weaviate_schema(client):
     class_obj = {
         "class": "ArticleVector",
         "description": "SDG article embeddings for semantic search",
-        "vectorizer": "none",  # We provide our own vectors
+        "vectorizer": "none", 
         "properties": [
             {
                 "name": "text",
@@ -155,37 +195,27 @@ def _create_weaviate_schema(client):
     client.schema.create_class(class_obj)
     logger.info("Created ArticleVector schema in Weaviate")
 
-def save_to_database(
-    metadata: Dict[str, Any],
-    text_content: str,
-    embeddings: List[float],
-    chunks_data: Optional[List[Dict]] = None
-):
-    
-    
+async def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: List[float], chunks_data: Optional[List[Dict]] = None):
+    """Save to database using centralized dependency management"""
     article_id = None
     
     try:
-        with get_db_connection() as connection:
-            
+        dep_manager = get_dependency_manager()
+        async with dep_manager.get_database_session() as connection:
             article_id = _insert_article(connection, metadata, text_content)
             
             if chunks_data:
                 _insert_article_chunks(connection, article_id, chunks_data)
             
             _insert_tag_relationships(connection, article_id, metadata)
-            
             _insert_ai_topic_relationships(connection, article_id, metadata)
-            
             _insert_sdg_target_relationships(connection, article_id, metadata)
             
             logger.info(f"✅ Article {article_id} saved to PostgreSQL successfully")
-            
-        try:
-            _save_to_weaviate(article_id, text_content, embeddings, chunks_data, metadata)
-        except Exception as e:
-            logger.error(f"Weaviate save failed for article {article_id}: {e}")
-            # Don't fail the entire operation for Weaviate errors
+        
+        # Get vector client for Weaviate operations
+        async with dep_manager.get_vector_client() as vector_client:
+            _save_to_weaviate_via_client(vector_client, article_id, text_content, embeddings, chunks_data, metadata)
             
         return article_id
         
@@ -194,6 +224,46 @@ def save_to_database(
         if article_id:
             logger.error(f"Article ID {article_id} may be partially saved")
         raise
+
+
+def _save_to_weaviate_via_client(vector_client, article_id: int, text_content: str, embeddings: List[float], 
+                                chunks_data: Optional[List[Dict]] = None, metadata: Dict[str, Any] = None):
+    """Save embeddings to Weaviate using dependency-managed client"""
+    try:
+        if chunks_data and len(chunks_data) > 0:
+            # Save each chunk as separate vector
+            for i, chunk_data in enumerate(chunks_data):
+                chunk_vector = chunk_data.get("embedding") or embeddings
+                
+                vector_data = {
+                    "text": chunk_data["text"],
+                    "articleId": article_id,
+                    "chunkId": i,
+                    "sdgGoals": metadata.get('sdg_goals', []) if metadata else [],
+                    "language": metadata.get('language', 'en') if metadata else 'en',
+                    "region": metadata.get('region', '') if metadata else ''
+                }
+                
+                vector_client.insert_data(vector_data, "ArticleVector", chunk_vector)
+        else:
+            # Save full document as single vector
+            vector_data = {
+                "text": text_content,
+                "articleId": article_id,
+                "chunkId": 0,
+                "sdgGoals": metadata.get('sdg_goals', []) if metadata else [],
+                "language": metadata.get('language', 'en') if metadata else 'en',
+                "region": metadata.get('region', '') if metadata else ''
+            }
+            
+            vector_client.insert_data(vector_data, "ArticleVector", embeddings)
+        
+        logger.info(f"✅ Vector data for article {article_id} saved via dependency manager")
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving to Weaviate via client: {e}")
+        raise
+
 
 def _insert_article(connection, metadata: Dict[str, Any], text_content: str) -> int:
     
@@ -557,7 +627,6 @@ def _extract_publication_year(metadata: Dict[str, Any]) -> Optional[int]:
                 if isinstance(year_value, list) and len(year_value) > 0:
                     year_value = year_value[0]
                 if isinstance(year_value, str):
-                    # Extract year from date string like "2023-01-01"
                     year_match = re.match(r'(\d{4})', year_value)
                     if year_match:
                         return int(year_match.group(1))
@@ -768,44 +837,51 @@ def get_database_statistics() -> Dict[str, Any]:
 
 def get_database_health() -> Dict[str, Any]:
     """
-    Check database health and return status information
+    Check database health and return status information with dependency awareness
     """
     try:
-        engine = get_database_engine()
-        
-        with engine.connect() as connection:
-            # Test basic connectivity
-            connection.execute(text("SELECT 1"))
+        if check_database_health():
+            engine = get_database_engine()
             
-            # Get table counts
-            tables = ['articles', 'sdgs', 'actors', 'tags', 'ai_topics', 'article_chunks']
-            table_counts = {}
-            
-            for table in tables:
+            with engine.connect() as connection:
+                # Get table counts
+                tables = ['articles', 'sdgs', 'actors', 'tags', 'ai_topics', 'article_chunks']
+                table_counts = {}
+                
+                for table in tables:
+                    try:
+                        result = connection.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                        table_counts[table] = result.scalar()
+                    except Exception as e:
+                        table_counts[table] = f"Error: {e}"
+                
+                # Check Weaviate health
                 try:
-                    result = connection.execute(text(f"SELECT COUNT(*) FROM {table}"))
-                    table_counts[table] = result.scalar()
+                    weaviate_client = get_weaviate_client()
+                    weaviate_ready = weaviate_client.is_ready()
                 except Exception as e:
-                    table_counts[table] = f"Error: {e}"
-            
-            # Check Weaviate health
-            try:
-                weaviate_client = get_weaviate_client()
-                weaviate_ready = weaviate_client.is_ready()
-            except Exception as e:
-                weaviate_ready = False
-                logger.error(f"Weaviate health check failed: {e}")
-            
+                    weaviate_ready = False
+                    logger.error(f"Weaviate health check failed: {e}")
+                
+                return {
+                    "database_status": "healthy",
+                    "weaviate_status": "healthy" if weaviate_ready else "unhealthy",
+                    "table_counts": table_counts,
+                    "timestamp": datetime.now().isoformat(),
+                    "dependency_manager": "integrated"
+                }
+        else:
             return {
-                "database_status": "healthy",
-                "weaviate_status": "healthy" if weaviate_ready else "unhealthy",
-                "table_counts": table_counts,
-                "timestamp": datetime.now().isoformat()
+                "database_status": "unhealthy",
+                "error": "Database connection failed",
+                "timestamp": datetime.now().isoformat(),
+                "dependency_manager": "integrated"
             }
             
     except Exception as e:
         return {
             "database_status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "dependency_manager": "error"
         }

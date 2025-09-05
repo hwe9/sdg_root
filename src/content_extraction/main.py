@@ -1,16 +1,13 @@
-"""
-Content Extraction Service - FastAPI Application
-Handles extraction from multiple sources: Gemini, web pages, newsletters, RSS feeds
-"""
 import os
 import sys
 import logging
 from typing import List, Dict, Any, Optional
 import asyncio
 from datetime import datetime
-
+from ..core.dependency_manager import dependency_manager, wait_for_dependencies, setup_sdg_dependencies
+from contextlib import asynccontextmanager
+from validators import validator
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -35,6 +32,10 @@ except ImportError as e:
     NewsletterExtractor = DummyExtractor
     RSSExtractor = DummyExtractor
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 async def initialize_extractors():
     config = {
         "retry_attempts": 3,
@@ -49,9 +50,6 @@ async def initialize_extractors():
         logger.error(f"Failed to initialize extractors: {e}")
         extractors['web'] = DummyExtractor(config)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Pydantic models
 class ExtractionRequest(BaseModel):
@@ -160,7 +158,8 @@ app = FastAPI(
     description="Microservice for extracting and analyzing content from multiple sources",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    livespan=livespan
 )
 
 # Add CORS middleware
@@ -174,26 +173,45 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on startup"""
-    await initialize_extractors()
+    """Initialize services on startup with dependency management"""
+    logger.info("🚀 Starting Content Extraction Service...")
+    
+    setup_sdg_dependencies()
+    
+    # Register content extraction startup tasks
+    async def initialize_content_extraction():
+        """Initialize content extraction dependencies"""
+        await wait_for_dependencies("database")
+        await initialize_extractors()
+        logger.info("✅ Content extraction service initialized")
+    
+    dependency_manager.register_startup_task("content_extraction", initialize_content_extraction)
+    
+    # Start dependency manager if not already started
+    if not dependency_manager._startup_complete.is_set():
+        await dependency_manager.start_all_services()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
+    logger.info("🔄 Shutting down Content Extraction Service...")
     for extractor in extractors.values():
         if hasattr(extractor, 'session') and extractor.session:
             await extractor.session.close()
-
 # Health check
-@app.get("/health")
 async def health_check():
-    """Service health check"""
+    """Service health check with dependency status"""
+    from ..core.dependency_manager import get_dependency_status
+    
+    dependency_status = await get_dependency_status()
+    
     return {
         "status": "healthy",
         "service": "SDG Content Extraction Service",
         "version": "1.0.0",
         "extractors_loaded": len(extractors),
-        "available_extractors": list(extractors.keys())
+        "available_extractors": list(extractors.keys()),
+        "dependencies": dependency_status
     }
 
 # Single URL extraction

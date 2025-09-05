@@ -1,8 +1,9 @@
 # /sdg_root/requirements-security.txt
-cryptography>=41.0.0
-keyring>=24.0.0
 bcrypt>=4.0.0
 PyJWT[crypto]>=2.8.0
-pydantic[email]>=2.0.0
+cryptography>=41.0.0
+keyring>=24.0.0
 python-multipart>=0.0.6
-slowapi>=0.1.9  # Rate limiting
+slowapi>=0.1.9
+pydantic[email]>=2.0.0
+passlib[bcrypt]>=1.7.4

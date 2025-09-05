@@ -115,25 +115,36 @@ class SDGSpecificModel(BaseEmbeddingModel):
         
         all_embeddings = []
         
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
-            
-            # Tokenize
-            encoded_input = self.tokenizer(
-                batch_texts,
-                padding=True,
-                truncation=True,
-                max_length=max_length,
-                return_tensors='pt'
-            ).to(self.device)
-            
-            # Generate embeddings
-            with torch.no_grad():
-                model_output = self.model(**encoded_input)
-                embeddings = self.mean_pooling(model_output, encoded_input['attention_mask'])
-                embeddings = F.normalize(embeddings, p=2, dim=1)
+        try:
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
                 
-            all_embeddings.extend(embeddings.cpu().numpy())
+                # Tokenize
+                encoded_input = self.tokenizer(
+                    batch_texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=max_length,
+                    return_tensors='pt'
+                ).to(self.device)
+                
+                # Generate embeddings
+                with torch.no_grad():
+                    model_output = self.model(**encoded_input)
+                    embeddings = self.mean_pooling(model_output, encoded_input['attention_mask'])
+                    embeddings = F.normalize(embeddings, p=2, dim=1)
+                    
+                    all_embeddings.extend(embeddings.cpu().numpy())
+
+                    del embeddings, model_output, encoded_input
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+        except Exception as e:
+            logger.error(f"Encoding error: {e}")
+            # Cleanup auch bei Fehlern
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            raise
         
         return np.array(all_embeddings)
     

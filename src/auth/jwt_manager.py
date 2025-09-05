@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from ..core.secrets_manager import secrets_manager
+from src.core.secrets_manager import secrets_manager
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,7 @@ class JWTManager:
         self.algorithm = "RS256"  # Use RSA instead of HMAC for better security
         self.access_token_expire_minutes = 30
         self.refresh_token_expire_days = 7
-        
-        # Load or generate key pair
+        self.refresh_token_family = {}
         self.private_key, self.public_key = self._load_or_generate_keys()
     
     def _load_or_generate_keys(self):
@@ -92,6 +91,9 @@ class JWTManager:
             })
             
             token = jwt.encode(payload, self.private_key, algorithm=self.algorithm)
+            if isinstance(token, bytes):
+                token = token.decode('utf-8')
+            
             return token
             
         except Exception as e:

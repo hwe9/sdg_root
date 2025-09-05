@@ -40,18 +40,28 @@ class VectorDBClient:
         
         self._initialize_client()
         self._setup_sdg_schema()
+
+    @classmethod
+    def from_dependency_manager(cls, dep_manager):
+        """Create client from centralized dependency manager"""
+        config = {
+            "url": dep_manager.config.weaviate_url,
+            "embedded": False,
+            "max_connections": 10,
+            "retry_attempts": 3,
+            "retry_delay": 1.0
+        }
+        return cls(config)
     
     def _initialize_client(self):
         """Initialize Weaviate client with configuration and URL validation"""
         try:
+            import weaviate.classes as wvc
             if self.config.get("embedded", False):
                 # Embedded Weaviate for development
-                self.client = weaviate.Client(
-                    embedded_options=EmbeddedOptions(
-                        hostname=self.config.get("hostname", "localhost"),
-                        port=self.config.get("port", 8080),
-                        grpc_port=self.config.get("grpc_port", 50051)
-                    )
+                self.client = weaviate.connect_to_embedded(
+                    port=self.config.get("port", 8080),
+                    grpc_port=self.config.get("grpc_port", 50051)
                 )
             else:
                 # Remote Weaviate instance mit URL-Validierung

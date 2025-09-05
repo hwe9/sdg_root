@@ -1,12 +1,14 @@
 import os
 import json
 import yaml
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 import logging
 from dataclasses import dataclass, field
 
+
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ServiceConfig:
@@ -21,7 +23,13 @@ class ServiceConfig:
     environment: str = "development"
     debug: bool = False
     log_level: str = "INFO"
+    # New dependency management fields
+    dependency_health_check_interval: int = 60
+    max_dependency_wait_time: int = 300
+    required_dependencies: List[str] = field(default_factory=list)
+    optional_dependencies: List[str] = field(default_factory=list)
     additional_config: Dict[str, Any] = field(default_factory=dict)
+
 
 class ConfigurationManager:
     """Central configuration management"""
@@ -61,7 +69,7 @@ class ConfigurationManager:
             self._create_default_configurations()
     
     def _create_default_configurations(self):
-        """Create default configuration files"""
+        """Create default configuration files with dependency information"""
         try:
             # Global configuration
             global_config = {
@@ -79,14 +87,45 @@ class ConfigurationManager:
                 }
             }
             
-            # Service configurations
+            # Service configurations with dependency mapping
             services = {
-                "data_retrieval": {"port": 8002, "timeout": 60},
-                "data_processing": {"port": 8001, "timeout": 120, "max_connections": 50},
-                "vectorization": {"port": 8003, "timeout": 30},
-                "content_extraction": {"port": 8004, "timeout": 45},
-                "api": {"port": 8000, "timeout": 30},
-                "auth": {"port": 8005, "timeout": 15}
+                "data_retrieval": {
+                    "port": 8002, 
+                    "timeout": 60,
+                    "required_dependencies": ["database"],
+                    "optional_dependencies": []
+                },
+                "data_processing": {
+                    "port": 8001, 
+                    "timeout": 120, 
+                    "max_connections": 50,
+                    "required_dependencies": ["database", "weaviate", "data_retrieval"],
+                    "optional_dependencies": ["content_extraction"]
+                },
+                "vectorization": {
+                    "port": 8003, 
+                    "timeout": 30,
+                    "required_dependencies": ["weaviate", "database"],
+                    "optional_dependencies": []
+                },
+                "content_extraction": {
+                    "port": 8004, 
+                    "timeout": 45,
+                    "required_dependencies": ["database"],
+                    "optional_dependencies": []
+                },
+                "api": {
+                    "port": 8000, 
+                    "timeout": 30,
+                    "required_dependencies": ["database", "auth"],
+                    "optional_dependencies": ["vectorization", "content_extraction"]
+                },
+                "auth": {
+                    "port": 8005, 
+                    "timeout": 15,
+                    "required_dependencies": ["database"],
+                    "optional_dependencies": []
+                }
             }
             
             # Save configurations
@@ -107,7 +146,7 @@ class ConfigurationManager:
                     **config
                 )
             
-            logger.info("Created default configuration files")
+            logger.info("Created default configuration files with dependency mapping")
             
         except Exception as e:
             logger.error(f"Error creating default configurations: {e}")
@@ -140,6 +179,65 @@ class ConfigurationManager:
                 **updates
             )
     
+    def get_dependency_chain(self, service_name: str) -> Dict[str, List[str]]:
+        """Get complete dependency chain for a service"""
+        config = self.get_service_config(service_name)
+        return {
+            "required": config.required_dependencies,
+            "optional": config.optional_dependencies,
+            "all": config.required_dependencies + config.optional_dependencies
+        }
+    
+    def get_service_startup_order(self) -> List[str]:
+        """Calculate optimal service startup order based on dependencies"""
+        services = list(self.services_config.keys())
+        ordered_services = []
+        remaining_services = set(services)
+        
+        while remaining_services:
+            # Find services with no unmet dependencies
+            ready_services = []
+            for service in remaining_services:
+                config = self.get_service_config(service)
+                unmet_deps = set(config.required_dependencies) - set(ordered_services)
+                if not unmet_deps:
+                    ready_services.append(service)
+            
+            if not ready_services:
+                # Circular dependency or missing service - add remaining arbitrarily
+                logger.warning("Potential circular dependency detected, adding remaining services")
+                ready_services = list(remaining_services)
+            
+            # Add ready services to order
+            for service in ready_services:
+                ordered_services.append(service)
+                remaining_services.remove(service)
+        
+        return ordered_services
+    
+    def validate_dependencies(self) -> Dict[str, List[str]]:
+        """Validate all service dependencies"""
+        issues = {}
+        all_services = set(self.services_config.keys())
+        
+        for service_name, config in self.services_config.items():
+            service_issues = []
+            
+            # Check required dependencies
+            for dep in config.required_dependencies:
+                if dep not in all_services and dep not in ["database", "weaviate"]:  # Allow external deps
+                    service_issues.append(f"Missing required dependency: {dep}")
+            
+            # Check optional dependencies
+            for dep in config.optional_dependencies:
+                if dep not in all_services and dep not in ["database", "weaviate"]:
+                    service_issues.append(f"Missing optional dependency: {dep}")
+            
+            if service_issues:
+                issues[service_name] = service_issues
+        
+        return issues
+    
     def get_database_url(self) -> str:
         """Get database URL with proper error handling"""
         try:
@@ -162,6 +260,7 @@ class ConfigurationManager:
             logger.error(f"Error constructing database URL: {e}")
             # Fallback URL
             return "postgresql://postgres:postgres@localhost:5432/sdg_pipeline"
+
 
 # Global configuration manager
 config_manager = ConfigurationManager()
