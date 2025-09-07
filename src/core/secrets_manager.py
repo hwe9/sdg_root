@@ -1,73 +1,58 @@
-# /sdg_root/src/core/secrets_manager.py
+# src/core/secrets_manager.py
 import os
 import base64
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import keyring
 import logging
+from typing import Optional
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 
 class SecretsManager:
     def __init__(self):
-        self.key = self._get_or_create_key()
-        self.cipher = Fernet(self.key)
-    
-    def _get_or_create_key(self):
-        """Get encryption key from secure storage or create new one"""
+        self._fernet = self._build_fernet()
+
+    def _build_fernet(self) -> Optional[Fernet]:
         try:
-            # Try to get key from system keyring
-            key = keyring.get_password("sdg_pipeline", "encryption_key")
-            if key:
-                return key.encode()
-            
-            # Generate new key if none exists
-            password = os.environ.get('MASTER_PASSWORD', 'default_dev_password').encode()
-            salt = os.environ.get('ENCRYPTION_SALT', 'default_salt').encode()
-            
+            secret = os.environ.get("SECRET_KEY")
+            salt = os.environ.get("ENCRYPTION_SALT", "default_salt").encode("utf-8")
+            if not secret:
+                logger.warning("SECRET_KEY not set; encrypted secrets will not be usable")
+                return None
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
                 salt=salt,
-                iterations=100000,
+                iterations=390000,
             )
-            key = base64.urlsafe_b64encode(kdf.derive(password))
-            
-            # Store in system keyring for production
-            if os.environ.get('ENVIRONMENT') == 'production':
-                keyring.set_password("sdg_pipeline", "encryption_key", key.decode())
-            
-            return key
+            key = base64.urlsafe_b64encode(kdf.derive(secret.encode("utf-8")))
+            return Fernet(key)
         except Exception as e:
-            logger.error(f"Error managing encryption key: {e}")
-            raise
-    
-    def encrypt_secret(self, plaintext: str) -> str:
-        """Encrypt a secret value"""
-        return self.cipher.encrypt(plaintext.encode()).decode()
-    
-    def decrypt_secret(self, encrypted: str) -> str:
-        """Decrypt a secret value"""
-        return self.cipher.decrypt(encrypted.encode()).decode()
-    
-    def get_secret(self, key: str) -> str:
-        """Enhanced error handling"""
-        try:
-            encrypted_value = os.environ.get(f"{key}_ENCRYPTED")
-            if encrypted_value:
-                return self.decrypt_secret(encrypted_value)
-            
-            # Fallback für Development
-            plaintext_value = os.environ.get(key)
-            if plaintext_value and os.environ.get('ENVIRONMENT') != 'production':
-                logger.warning(f"Using plaintext secret for {key}")
-                return plaintext_value
-            
-            raise ValueError(f"Secret {key} not found")
-        except Exception as e:
-            logger.error(f"Error retrieving secret {key}: {e}")
-            raise
+            logger.error(f"Failed to init Fernet: {e}")
+            return None
 
-# Initialize global secrets manager
+    def encrypt_secret(self, plaintext: str) -> str:
+        if not self._fernet:
+            raise RuntimeError("Fernet not initialized; cannot encrypt")
+        token = self._fernet.encrypt(plaintext.encode("utf-8"))
+        return token.decode("utf-8")
+
+    def decrypt_secret(self, token: str) -> str:
+        if not self._fernet:
+            raise RuntimeError("Fernet not initialized; cannot decrypt")
+        plaintext = self._fernet.decrypt(token.encode("utf-8"))
+        return plaintext.decode("utf-8")
+
+    def get_secret(self, key: str) -> Optional[str]:
+        enc = os.environ.get(f"{key}_ENCRYPTED")
+        if enc:
+            try:
+                return self.decrypt_secret(enc)
+            except Exception as e:
+                logger.error(f"Decrypt failed for {key}_ENCRYPTED: {e}")
+                return None
+        return os.environ.get(key)
+
+# global instance
 secrets_manager = SecretsManager()

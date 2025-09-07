@@ -1,7 +1,3 @@
-"""
-Vector Database Client for SDG Pipeline
-Enhanced Weaviate integration with connection pooling and SDG schema
-"""
 import logging
 import time
 from typing import List, Dict, Any, Optional, Union
@@ -17,12 +13,7 @@ import threading
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class VectorDBClient:
-    """
-    Enhanced Weaviate client for SDG vector operations
-    Includes connection pooling, retry logic, and SDG-specific schema
-    """
-    
+class VectorDBClient:    
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.client = None
@@ -54,7 +45,6 @@ class VectorDBClient:
         return cls(config)
     
     def _initialize_client(self):
-        """Initialize Weaviate client with configuration and URL validation"""
         try:
             import weaviate.classes as wvc
             if self.config.get("embedded", False):
@@ -85,11 +75,9 @@ class VectorDBClient:
                     additional_headers=headers
                 )
             
-            # Test connection mit Retry-Logic
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    self.client = weaviate.Client(url=weaviate_url)
                     if self.client.is_ready():
                         logger.info(f"Weaviate client initialized successfully (attempt {attempt + 1})")
                         break
@@ -110,7 +98,6 @@ class VectorDBClient:
     def _setup_sdg_schema(self):
         """Setup SDG schema with version compatibility check"""
         try:
-            # Schema-Versions-Kompatibilität prüfen
             current_version = "1.0"
             
             try:
@@ -442,15 +429,17 @@ class VectorDBClient:
             return {}
     
     def health_check(self) -> Dict[str, Any]:
-        """Perform health check on vector database"""
         try:
             is_ready = self.client.is_ready()
             is_live = self.client.is_live()
+            meta = self.client.get_meta() or {}
+            version = None
             
             return {
                 "status": "healthy" if is_ready and is_live else "unhealthy",
                 "ready": is_ready,
                 "live": is_live,
+                "meta": {"version": version},
                 "timestamp": datetime.utcnow().isoformat(),
                 "statistics": self.get_statistics()
             }

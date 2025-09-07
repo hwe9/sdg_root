@@ -1,7 +1,3 @@
-"""
-Advanced Similarity Search for SDG Content
-Semantic search, SDG interlinkage analysis, and content recommendations
-"""
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
@@ -18,11 +14,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class SimilaritySearch:
-    """
-    Advanced similarity search with SDG-specific intelligence
-    Integrates with your sdg_interlinks.py for cross-SDG analysis
-    """
-    
     def __init__(self, 
                  vector_client: VectorDBClient,
                  embedding_manager: EmbeddingManager,
@@ -39,10 +30,6 @@ class SimilaritySearch:
         self.max_results = config.get("max_results", 100)
         
     def _load_sdg_interlinkages(self) -> Dict[int, List[int]]:
-        """
-        Load SDG interlinkage data
-        This should integrate with your existing sdg_interlinks.py
-        """
         # Simplified interlinkage mapping - replace with your full data
         interlinkages = {
             1: [2, 3, 4, 6, 8, 10],  # No Poverty links
@@ -72,9 +59,6 @@ class SimilaritySearch:
                             region: str = None,
                             sdg_goals: List[int] = None,
                             limit: int = 10) -> Dict[str, Any]:
-        """
-        Advanced semantic search with multiple search strategies
-        """
         try:
             # Generate query embedding
             query_embedding = self.embedding_manager.encode(query)
@@ -453,16 +437,49 @@ class SimilaritySearch:
             }
 
 class SDGRecommendationEngine:
-    """
-    SDG-specific content recommendation engine
-    """
-    
     def __init__(self, similarity_search: SimilaritySearch):
         self.similarity_search = similarity_search
         self.sdg_weights = self._initialize_sdg_weights()
+
+    async def get_recommendations(
+        self,
+        user_interests: List[int],
+        region: Optional[str] = None,
+        language: str = "en",
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        if not user_interests:
+            return []
+        per_goal = max(1, limit // max(1, len(user_interests)))
+        bucket: List[Dict[str, Any]] = []
+        seen = set()
+        # Query per SDG interest to diversify results
+        for sdg in user_interests:
+            try:
+                res = await self.search.semantic_search(
+                    query=f"SDG {sdg}",
+                    search_type="general",
+                    language=language,
+                    region=region,
+                    sdg_goals=[sdg],
+                    limit=per_goal
+                )
+                for item in res.get("results", []):
+                    # Build a simple dedup key
+                    key = (item.get("source_url") or "", item.get("title") or "")
+                    if key not in seen:
+                        seen.add(key)
+                        bucket.append(item)
+            except Exception as e:
+                logger.warning(f"Recommendation fetch failed for SDG {sdg}: {e}")
+                continue
+        # Truncate to limit
+        return bucket[:limit]
+
+    def health_check(self) -> Dict[str, Any]:
+        return {"status": "healthy"}
     
     def _initialize_sdg_weights(self) -> Dict[int, float]:
-        """Initialize SDG importance weights based on global priorities"""
         # Weights based on UN priority areas and interconnectedness
         return {
             1: 1.0,   # No Poverty - foundational

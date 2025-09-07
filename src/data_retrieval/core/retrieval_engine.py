@@ -1,7 +1,3 @@
-"""
-Enhanced Retrieval Engine - Main orchestration component
-Coordinates all retrieval activities with improved error handling and monitoring
-"""
 import asyncio
 import logging
 from datetime import datetime
@@ -32,10 +28,6 @@ class RetrievalStats:
         return asdict(self)
 
 class RetrievalEngine:
-    """
-    Enhanced retrieval engine with comprehensive error handling,
-    security validation, and performance monitoring
-    """
     
     def __init__(self, source_manager: SourceManager, data_dir: str, processed_file: str):
         self.source_manager = source_manager
@@ -44,7 +36,13 @@ class RetrievalEngine:
         
         # Initialize components
         self.content_validator = ContentValidator()
-        self.rate_limiter = RateLimiter()
+        self.rate_limiter = RateLimiter(
+            global_rps=float(os.getenv("RATE_LIMIT_GLOBAL_RPS", "10")),
+            per_domain_rps=float(os.getenv("RATE_LIMIT_PER_DOMAIN_RPS", "1.5")),
+            robots_respect=bool(int(os.getenv("ROBOTS_RESPECT_CRAWL_DELAY", "1"))),
+            robots_default_delay=float(os.getenv("ROBOTS_DEFAULT_DELAY_SEC", "1.0")),
+            jitter_ms=int(os.getenv("RATE_LIMIT_JITTER_MS", "200"))
+        )
         self.security_validator = SecurityValidator()
         
         # Status tracking
@@ -57,7 +55,6 @@ class RetrievalEngine:
         os.makedirs(os.path.dirname(processed_file), exist_ok=True)
     
     async def initialize(self):
-        """Initialize engine components"""
         try:
             await self.source_manager.initialize()
             await self.content_validator.initialize()
@@ -70,9 +67,6 @@ class RetrievalEngine:
                           sources: Optional[List[str]] = None,
                           force_refresh: bool = False,
                           max_concurrent: int = 5) -> RetrievalStats:
-        """
-        Run enhanced retrieval process with improved orchestration
-        """
         if self.is_running:
             logger.warning("Retrieval already in progress")
             return self.current_stats
@@ -202,7 +196,6 @@ class RetrievalEngine:
                 return None
     
     async def _save_processed_data(self, processed_data: List[Dict[str, Any]]):
-        """Save processed data to JSON file"""
         try:
             with open(self.processed_file, "w", encoding="utf-8") as f:
                 json.dump(processed_data, f, ensure_ascii=False, indent=2)
@@ -211,7 +204,6 @@ class RetrievalEngine:
             logger.error(f"❌ Failed to save processed data: {e}")
     
     async def _save_metadata_file(self, url: str, metadata: Dict[str, Any]):
-        """Save individual metadata file"""
         try:
             # Generate safe filename
             import hashlib
@@ -227,7 +219,6 @@ class RetrievalEngine:
             logger.error(f"❌ Failed to save metadata for {url}: {e}")
     
     async def _signal_processing_service(self, processed_data: List[Dict[str, Any]]):
-        """Signal processing service about new data"""
         try:
             # Create signal file for processing service
             signal_data = {
@@ -246,7 +237,6 @@ class RetrievalEngine:
             logger.error(f"❌ Failed to signal processing service: {e}")
     
     def get_status(self) -> Dict[str, Any]:
-        """Get current retrieval status"""
         return {
             "is_running": self.is_running,
             "last_run": self.last_run_time.isoformat() if self.last_run_time else None,
@@ -256,7 +246,6 @@ class RetrievalEngine:
         }
     
     def health_check(self) -> Dict[str, Any]:
-        """Health check for retrieval engine"""
         try:
             return {
                 "status": "healthy",
@@ -271,3 +260,12 @@ class RetrievalEngine:
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
+        
+    async def cleanup(self):
+        """Cleanup all underlying source handlers"""
+        try:
+            if self.source_manager:
+                await self.source_manager.cleanup()
+            logger.info("✅ Retrieval engine cleaned up")
+        except Exception as e:
+            logger.warning(f"Retrieval engine cleanup warning: {e}")

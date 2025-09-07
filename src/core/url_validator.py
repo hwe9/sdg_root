@@ -47,49 +47,51 @@ class URLValidator:
             'europa.eu', 'unicef.org', 'undp.org', 'unesco.org',
             'doi.org', 'crossref.org', 'googleapis.com'
         }
-    
-    def validate_url(self, url: str) -> tuple[bool, str]:
-        """
-        Validate URL for SSRF protection
-        Returns: (is_valid, error_message)
-        """
-        if self._is_ip_blocked(ip):
-            return False, f"IP address {ip} is in blocked range"
+    # src/core/url_validator.py (nur validate_url überarbeiten)
 
+    def validate_url(self, url: str) -> tuple[bool, str]:
         try:
-            # Basic URL parsing
-            parsed = urlparse(url.lower())
-            
-            # Check scheme
-            if parsed.scheme not in self.allowed_schemes:
-                return False, f"Scheme '{parsed.scheme}' not allowed"
-            
-            # Check hostname exists
-            if not parsed.hostname:
+            parsed = urlparse(url)
+            scheme = parsed.scheme.lower()
+            if scheme not in self.allowed_schemes:
+                return False, f"Scheme '{scheme}' not allowed"
+
+            hostname = (parsed.hostname or "").lower()
+            if not hostname:
                 return False, "No hostname provided"
-            
-            # Check domain whitelist
-            if not self._is_domain_allowed(parsed.hostname):
-                return False, f"Domain '{parsed.hostname}' not in whitelist"
-            
-            # Resolve hostname to IP
+
+            # 1) Direkte IPs sofort ablehnen (IPv4/IPv6)
             try:
-                ip_str = socket.gethostbyname(parsed.hostname)
-                ip = ipaddress.ip_address(ip_str)
-            except (socket.gaierror, ValueError) as e:
+                ip_obj = ipaddress.ip_address(hostname)
+                # Wenn es eine IP ist: hart ablehnen, da IP-Literale nicht zugelassen
+                return False, "Direct IP addresses not allowed"
+            except ValueError:
+                ip_obj = None  # hostname ist kein IP-Literal
+
+            # 2) Whitelist-Domains prüfen
+            if not self._is_domain_allowed(hostname):
+                return False, f"Domain '{hostname}' not in whitelist"
+
+            # 3) DNS-Auflösung (IPv4/IPv6) → Private/Loopback blocken
+            try:
+                infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+                for family, _, _, _, sockaddr in infos:
+                    ip_str = sockaddr
+                    try:
+                        ip = ipaddress.ip_address(ip_str)
+                        if self._is_ip_blocked(ip):
+                            return False, f"IP address {ip} is in blocked range"
+                    except ValueError:
+                        continue
+            except Exception as e:
                 return False, f"Cannot resolve hostname: {e}"
-            
-            # Check if IP is in blocked ranges
-            if self._is_ip_blocked(ip):
-                return False, f"IP address {ip} is in blocked range"
-            
-            # Check port
-            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+
+            # 4) Ports prüfen
+            port = parsed.port or (443 if scheme == 'https' else 80)
             if port in self.blocked_ports:
                 return False, f"Port {port} is blocked"
-            
+
             return True, ""
-            
         except Exception as e:
             logger.error(f"URL validation error: {e}")
             return False, f"URL validation failed: {e}"

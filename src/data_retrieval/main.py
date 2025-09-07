@@ -1,12 +1,7 @@
-"""
-Enhanced SDG Data Retrieval Service
-Production-ready FastAPI service with dependency management integration
-"""
-import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import List, Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
@@ -194,24 +189,17 @@ async def get_source_manager() -> SourceManager:
 async def health_check():
     """Comprehensive service health check with dependency status"""
     try:
-        # Get dependency status
         dependency_status = await get_dependency_status()
-        
-        # Check local components
+
+        # Gesamtstatus ausschließlich aus dem dependency_manager ableiten
+        overall = dependency_status.get("overall_status", "starting")
+
+        # Lokale Komponenten als Detail beilegen, aber nicht zur Wertung heranziehen
         engine_health = retrieval_engine.health_check() if retrieval_engine else {"status": "not_initialized"}
         source_health = source_manager.health_check() if source_manager else {"status": "not_initialized"}
-        
-        # Determine overall status
-        overall_status = "healthy"
-        
-        if engine_health.get("status") != "healthy" or source_health.get("status") != "healthy":
-            overall_status = "unhealthy"
-        
-        if dependency_status.get("overall_status") not in ["healthy", "starting"]:
-            overall_status = "degraded"
-        
+
         return {
-            "status": overall_status,
+            "status": overall,                           # Single source of truth
             "service": "SDG Data Retrieval Service",
             "version": "2.0.0",
             "timestamp": datetime.utcnow().isoformat(),
@@ -222,16 +210,14 @@ async def health_check():
             "dependencies": dependency_status,
             "startup_complete": dependency_manager._startup_complete.is_set()
         }
-        
     except Exception as e:
         logger.error(f"Health check error: {e}")
         return {
-            "status": "error", 
+            "status": "error",
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
-
-
+    
 @app.post("/retrieve", response_model=RetrievalStatus)
 @handle_errors()
 async def start_retrieval(

@@ -1,12 +1,9 @@
-"""
-Advanced embedding models for multilingual SDG content
-Extracted and enhanced from your text_vektorizer.py and processing_logic.py
-"""
+
 import logging
 from typing import List, Dict, Any, Optional, Union
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import openai
+from openai import OpenAI
 from transformers import AutoTokenizer, AutoModel
 import torch
 import torch.nn.functional as F
@@ -59,31 +56,35 @@ class SentenceTransformerModel(BaseEmbeddingModel):
         return self.dimension
 
 class OpenAIEmbeddingModel(BaseEmbeddingModel):
-    """OpenAI embeddings for high-quality SDG analysis"""
-    
-    def __init__(self, model_name: str = "text-embedding-ada-002", api_key: str = None):
+    def __init__(self, model_name: str = "text-embedding-3-small", api_key: str = None):
         self.model_name = model_name
-        self.dimension = 1536 if model_name == "text-embedding-ada-002" else 1536
-        if api_key:
-            openai.api_key = api_key
-        logger.info(f"Initialized OpenAI embedding model: {model_name}")
-    
+        # Dimensions: small=1536, large=3072, ada-002=1536
+        if model_name in ["text-embedding-3-small", "text-embedding-ada-002"]:
+            self.dimension = 1536
+        elif model_name in ["text-embedding-3-large"]:
+            self.dimension = 3072
+        else:
+            self.dimension = 1536
+        self.client = OpenAI(api_key=api_key) if api_key else OpenAI()
+        logger.info(f"Initialized OpenAI embedding model (v1 client): {model_name}")
+
     def encode(self, texts: Union[str, List[str]], **kwargs) -> np.ndarray:
-        """Generate OpenAI embeddings"""
-        if isinstance(texts, str):
-            texts = [texts]
         
+        if isinstance(texts, str):
+                texts = [texts]
+        if not isinstance(texts, list) or len(texts) == 0:
+                raise ValueError("texts must be a non-empty list or a string")
         try:
-            response = openai.Embedding.create(
-                input=texts,
-                model=self.model_name
+            resp = self.client.embeddings.create(
+                model=self.model_name,
+                input=texts
             )
-            embeddings = np.array([item['embedding'] for item in response['data']])
-            return embeddings
+            vecs = [d.embedding for d in resp.data]
+            return np.asarray(vecs, dtype=float)
         except Exception as e:
             logger.error(f"OpenAI embedding error: {e}")
             raise
-    
+
     def get_dimension(self) -> int:
         return self.dimension
 

@@ -1,5 +1,0 @@
-Collecting bcrypt
-  Downloading bcrypt-4.3.0-cp39-abi3-manylinux_2_34_x86_64.whl (284 kB)
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 284.2/284.2 kB 8.2 MB/s eta 0:00:00
-Installing collected packages: bcrypt
-Successfully installed bcrypt-4.3.0

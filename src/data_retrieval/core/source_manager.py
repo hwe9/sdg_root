@@ -1,10 +1,7 @@
-"""
-Dynamic Source Management
-Handles different source types and maintains download history
-"""
 import os
 import csv
 import logging
+import asyncio, inspect
 from datetime import datetime
 from typing import Set, Dict, Any, Optional, List
 from urllib.parse import urlparse
@@ -17,10 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class SourceManager:
-    """
-    Manages different types of data sources and coordinates downloads
-    """
-    
+        
     def __init__(self, sources_file: str, data_dir: str):
         self.sources_file = sources_file
         self.data_dir = data_dir
@@ -201,6 +195,19 @@ class SourceManager:
         except Exception as e:
             logger.error(f"Error getting source summary: {e}")
             return {"error": str(e)}
+        
+    async def cleanup(self):
+        """Cleanup all source handlers and close sessions"""
+        try:
+            for handler in self.source_handlers.values():
+                if hasattr(handler, "cleanup"):
+                    if inspect.iscoroutinefunction(handler.cleanup):
+                        await handler.cleanup()
+                    else:
+                        handler.cleanup()
+            logger.info("✅ Source manager cleaned up")
+        except Exception as e:
+            logger.warning(f"SourceManager cleanup warning: {e}")
     
     def health_check(self) -> Dict[str, Any]:
         """Health check for source manager"""

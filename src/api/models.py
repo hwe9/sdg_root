@@ -1,19 +1,13 @@
 import os
-
 from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, Table, JSON, Boolean, Index
-
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base
-
 from sqlalchemy.sql import func
-
 from datetime import datetime
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
 Base = declarative_base()
-
 
 articles_tags = Table(
     'articles_tags',
@@ -287,4 +281,3 @@ Index('idx_articles_has_embeddings', Article.has_embeddings)
 Index('idx_chunks_article_order', ArticleChunk.article_id, ArticleChunk.chunk_order)
 Index('idx_progress_actor_sdg_year', SdgProgress.actor_id, SdgProgress.sdg_id, SdgProgress.year)
 
-Base.metadata.create_all(bind=engine)

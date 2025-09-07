@@ -17,6 +17,7 @@ except ImportError:
 import logging
 from datetime import datetime, timedelta
 from ...core.dependency_manager import get_dependency_manager
+import httpx
 import hashlib
 
 logging.basicConfig(level=logging.INFO)
@@ -138,20 +139,43 @@ def get_db_connection():
             logger.error(f"Unexpected database error: {e}")
             raise
 
+def _check_weaviate_health(base_url: str, timeout: float = 5.0) -> bool:
+    """
+    Check Weaviate readiness using /.well-known/ready or /v1/.well-known/ready,
+    with /v1/meta as a fallback for older healthcheck styles.
+    """
+    base = base_url.rstrip("/")
+    endpoints = ["/.well-known/ready", "/v1/.well-known/ready", "/v1/meta"]
+    for path in endpoints:
+        url = f"{base}{path}"
+        try:
+            resp = httpx.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            continue
+    return False
+
 def get_weaviate_client():
-    """Create and return Weaviate client instance"""
+    """Create and return Weaviate client instance with explicit health check"""
+    if not _check_weaviate_health(WEAVIATE_URL):
+        raise ConnectionError(
+            f"Weaviate not ready at {WEAVIATE_URL}; readiness check failed (/.well-known/ready or /v1/meta)"
+        )
     try:
         client = weaviate.Client(url=WEAVIATE_URL)
-        
+
+        # Ensure schema class exists (Schema-Erzeugung beibehalten)
         try:
             client.schema.get("ArticleVector")
         except weaviate.exceptions.UnexpectedStatusCodeException:
             _create_weaviate_schema(client)
-        
+
         return client
     except Exception as e:
         logger.error(f"Failed to connect to Weaviate: {e}")
         raise ConnectionError(f"Weaviate connection failed: {e}")
+
 
 def _create_weaviate_schema(client):
     class_obj = {
@@ -201,22 +225,22 @@ async def save_to_database(metadata: Dict[str, Any], text_content: str, embeddin
     
     try:
         dep_manager = get_dependency_manager()
-        async with dep_manager.get_database_session() as connection:
+        async with dep_manager.get_db_connection() as connection:
             article_id = _insert_article(connection, metadata, text_content)
-            
+
             if chunks_data:
                 _insert_article_chunks(connection, article_id, chunks_data)
-            
+
             _insert_tag_relationships(connection, article_id, metadata)
             _insert_ai_topic_relationships(connection, article_id, metadata)
             _insert_sdg_target_relationships(connection, article_id, metadata)
-            
+
             logger.info(f"✅ Article {article_id} saved to PostgreSQL successfully")
-        
-        # Get vector client for Weaviate operations
+
+        # Vector-Client wie gehabt über den Dependency-Manager
         async with dep_manager.get_vector_client() as vector_client:
             _save_to_weaviate_via_client(vector_client, article_id, text_content, embeddings, chunks_data, metadata)
-            
+
         return article_id
         
     except Exception as e:

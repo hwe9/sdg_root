@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional, List
 
@@ -22,9 +22,7 @@ class TagCreate(TagBase):
 
 class Tag(TagBase):
     id: int
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SdgBase(BaseModel):
     name: str
@@ -35,9 +33,7 @@ class SdgCreate(SdgBase):
 
 class Sdg(SdgBase):
     id: int
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ActorBase(BaseModel):
     name: str
@@ -49,9 +45,7 @@ class ActorCreate(ActorBase):
 
 class Actor(ActorBase):
     id: int
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SdgProgressBase(BaseModel):
     actor_id: int
@@ -61,9 +55,7 @@ class SdgProgressBase(BaseModel):
 
 class SdgProgress(SdgProgressBase):
     id: int
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ArticleBase(BaseModel):
     title: str
@@ -109,12 +101,6 @@ class ImageBase(BaseModel):
 class ArticleCreate(ArticleBase):
     pass
 
-class Article(ArticleBase):
-    id: int
-    created_at: datetime
-    tags: List[Tag] = []
-    ai_topics: List[AiTopic] = []
-
 class ArticleChunkBase(BaseModel):
     chunk_order: int
     text: str
@@ -129,16 +115,15 @@ class ArticleChunk(ArticleChunkBase):
     id: int
     article_id: int
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Article(ArticleBase):
     id: int
     created_at: datetime
     tags: List[Tag] = []
     ai_topics: List[AiTopic] = []
-    chunks: List[ArticleChunk] = []  # NEW LINE
+    chunks: List[ArticleChunk] = [] 
+    model_config = ConfigDict(from_attributes=True)
     
 class SDGTargetBase(BaseModel):
     target_id: str
@@ -156,9 +141,8 @@ class SDGTargetCreate(SDGTargetBase):
 class SDGTarget(SDGTargetBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class SDGIndicatorBase(BaseModel):
     indicator_id: str
@@ -172,6 +156,7 @@ class SDGIndicatorBase(BaseModel):
 
 class SDGIndicator(SDGIndicatorBase):
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
     
 class Config:
     from_attributes = True

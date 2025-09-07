@@ -1,7 +1,3 @@
-"""
-Protocol-specific download strategies
-Handles different content types and protocols securely
-"""
 import os
 import hashlib
 import logging
@@ -15,19 +11,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DownloadStrategy:
-    """Base class for download strategies"""
     
     def __init__(self):
         self.session = None
-        self.timeout = 30
-        self.max_file_size = 50 * 1024 * 1024  # 50MB
-        self.user_agent = 'SDG-Pipeline-Bot/2.0 (+https://sdg-pipeline.org/bot)'
+        self.timeout = int(os.getenv("HTTP_TOTAL_TIMEOUT", "45"))
+        self.connect_timeout = int(os.getenv("HTTP_CONNECT_TIMEOUT", "10"))
+        self.read_timeout = int(os.getenv("HTTP_READ_TIMEOUT", "30"))
+        self.max_file_size = int(os.getenv("MAX_FILE_SIZE_BYTES", str(50 * 1024 * 1024)))
+        self.user_agent = os.getenv("RETRIEVAL_UA", 'SDG-Pipeline-Bot/2.0 (+https://sdg-pipeline.org/bot)')
     
     async def initialize(self):
-        """Initialize HTTP session"""
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=10)
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        
+        connector = aiohttp.TCPConnector(
+            limit=int(os.getenv("HTTP_CONN_LIMIT", "50")),
+            limit_per_host=int(os.getenv("HTTP_CONN_PER_HOST", "5"))
+        )
+        timeout = aiohttp.ClientTimeout(
+            total=self.timeout,
+            connect=self.connect_timeout,
+            sock_read=self.read_timeout,
+        )
         self.session = aiohttp.ClientSession(
             connector=connector,
             timeout=timeout,
