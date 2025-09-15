@@ -180,13 +180,7 @@ class Article(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     processed_at = Column(DateTime(timezone=True))
-    
     content_quality_score = Column(Float, default=0.0)
-    has_embeddings = Column(Boolean, default=False, index=True)
-    embedding_model = Column(String(100))
-    embedding_dimension = Column(Integer)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    processed_at = Column(DateTime(timezone=True))
 
     tags = relationship("Tag", secondary=articles_tags, back_populates="articles")
     ai_topics = relationship("AiTopic", secondary=articles_ai_topics, back_populates="articles")

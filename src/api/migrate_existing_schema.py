@@ -170,29 +170,30 @@ def migrate_existing_schema():
         except Exception as e:
             logger.warning(f"SDG data update: {e}")
         
+                    # SDG targets and indicators (create if not exist)
+        try:
             conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS sdg_targets (
-                        target_id VARCHAR(10) PRIMARY KEY,
-                        goal_id INTEGER REFERENCES sdgs(id) ON DELETE CASCADE,
-                        title_en TEXT NOT NULL,
-                        title_de TEXT,
-                        title_fr TEXT,
-                        title_es TEXT,
-                        title_zh TEXT,
-                        title_hi TEXT,
-                        description TEXT,
-                        description_de TEXT,
-                        description_fr TEXT,
-                        description_es TEXT,
-                        description_zh TEXT,
-                        description_hi TEXT,
-                        target_type VARCHAR(50),
-                        deadline_year INTEGER DEFAULT 2030,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                        updated_at TIMESTAMP WITH TIME ZONE
-                    );
-                """))
-                
+                CREATE TABLE IF NOT EXISTS sdg_targets (
+                    target_id VARCHAR(10) PRIMARY KEY,
+                    goal_id INTEGER REFERENCES sdgs(id) ON DELETE CASCADE,
+                    title_en TEXT NOT NULL,
+                    title_de TEXT,
+                    title_fr TEXT,
+                    title_es TEXT,
+                    title_zh TEXT,
+                    title_hi TEXT,
+                    description TEXT,
+                    description_de TEXT,
+                    description_fr TEXT,
+                    description_es TEXT,
+                    description_zh TEXT,
+                    description_hi TEXT,
+                    target_type VARCHAR(50),
+                    deadline_year INTEGER DEFAULT 2030,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE
+                );
+            """))
 
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS sdg_indicators (
@@ -213,15 +214,14 @@ def migrate_existing_schema():
                     updated_at TIMESTAMP WITH TIME ZONE
                 );
             """))
-            
-            # Create indexes
+
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sdg_targets_goal_id ON sdg_targets(goal_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sdg_indicators_target_id ON sdg_indicators(target_id);"))
-                
+
             logger.info("✅ Created SDG targets and indicators tables")
-            
         except Exception as e:
             logger.error(f"Error creating SDG targets/indicators: {e}")
+
 
     logger.info("Schema migration completed successfully!")
 

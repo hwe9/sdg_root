@@ -456,7 +456,7 @@ class SDGRecommendationEngine:
         # Query per SDG interest to diversify results
         for sdg in user_interests:
             try:
-                res = await self.search.semantic_search(
+                res = await self.similarity_search.semantic_search(
                     query=f"SDG {sdg}",
                     search_type="general",
                     language=language,
@@ -512,7 +512,7 @@ class SDGRecommendationEngine:
             
             # Get content for user's primary interests
             for sdg_goal in user_interests:
-                results = self.similarity_search.vector_client.search_by_sdg_goals(
+                results = self.vector_client.search_by_sdg_goals(
                     sdg_goals=[sdg_goal],
                     limit=limit // len(user_interests) + 2
                 )

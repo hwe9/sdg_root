@@ -1,12 +1,24 @@
 # src/api/database.py
 import os
 import logging
+from urllib.parse import quote_plus
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+def _build_db_url() -> str:
+    explicit_url = os.environ.get("DATABASE_URL")
+    if explicit_url:
+        return explicit_url
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = quote_plus(os.getenv("POSTGRES_PASSWORD", "postgres"))
+    host = os.getenv("DB_HOST", "database_service")
+    port = os.getenv("DB_PORT", "5432")
+    name = os.getenv("POSTGRES_DB", "sdg_pipeline")
+    return f"postgresql://{user}:{password}@{host}:{port}/{name}"
+
+DATABASE_URL = _build_db_url
 
 engine = create_engine(
     DATABASE_URL,

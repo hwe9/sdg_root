@@ -92,6 +92,8 @@ services:
         - BUILD_ENV=production
     container_name: api_service
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     expose:
       - "8000"
     volumes:
@@ -329,7 +331,7 @@ services:
         condition: service_healthy
       data_retrieval_service:
         condition: service_healthy
-    command: python main.py
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 45s

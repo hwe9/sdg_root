@@ -16,6 +16,7 @@ from pathlib import Path
 from .jwt_manager import jwt_manager
 from ..core.secrets_manager import secrets_manager
 from ..core.service_registry import service_registry
+from cryptography.hazmat.primitives import serialization
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

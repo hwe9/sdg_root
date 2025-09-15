@@ -1,5 +1,5 @@
 # /sdg_root/src/core/dependency_manager.py
-import os
+import os, random
 import asyncio
 import logging
 import json, time
@@ -469,6 +469,7 @@ class DependencyManager:
 
     async def _health_check_service(self, service: ServiceDependency) -> bool:
         def _probe_sync() -> bool:
+            url = f"{service.url}{service.health_endpoint}"
             resp = httpx.get(url, timeout=service.timeout)
             resp.raise_for_status()
             data = resp.json()
