@@ -1,4 +1,4 @@
-# /sdg_root/src/core/config.py
+# /sdg_root/src/auth/config.py
 import os
 from enum import Enum
 from pydantic import BaseSettings

@@ -1,22 +1,19 @@
 # /src/auth/jwt_rotation_service.py
-"""
-Automatic JWT Key Rotation Service
-Handles monthly JWT key rotation for enhanced security
-"""
 import os
 import asyncio
 import logging
-import schedule
-import time
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Optional
 from dataclasses import dataclass
 from pathlib import Path
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  
+from apscheduler.triggers.cron import CronTrigger
 
 from .jwt_manager import jwt_manager
 from ..core.secrets_manager import secrets_manager
 from ..core.service_registry import service_registry
 from cryptography.hazmat.primitives import serialization
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,12 +27,11 @@ class RotationResult:
     affected_services: list
     error_message: Optional[str] = None
 
-class JWTRotationService:
-    """Handles automatic JWT key rotation with service coordination"""
-    
+class JWTRotationService:    
     def __init__(self):
         self.rotation_day = int(os.environ.get("JWT_ROTATION_DAY", "1"))  # 1st of each month
         self.rotation_hour = int(os.environ.get("JWT_ROTATION_HOUR", "2"))  # 2 AM
+        self._scheduler=None
         self.backup_retention_months = int(os.environ.get("JWT_KEY_RETENTION_MONTHS", "3"))
         self.service_coordination_timeout = 300  # 5 minutes
         
@@ -51,22 +47,15 @@ class JWTRotationService:
         """Start the automatic rotation scheduler"""
         logger.info("Starting JWT rotation scheduler...")
         
-        # Schedule monthly rotation
-        schedule.every().month.at(f"{self.rotation_hour:02d}:00").on(self.rotation_day).do(
-            self._schedule_rotation
-        )
-        
-        # Also schedule a manual trigger check (daily)
-        schedule.every().day.at("01:00").do(self._check_manual_rotation_trigger)
-        
-        # Run scheduler in background
+        if self._scheduler is None:
+            self._scheduler = AsyncIOScheduler(timezone="UTC")
+            trigger = CronTrigger(day=self.rotation_day, hour=self.rotation_hour, minute=0)
+            self._scheduler.add_job(self._schedule_rotation, trigger=trigger, id="jwt_monthly_rotation", replace_existing=True)
+            self._scheduler.start()
+        # keep a lightweight periodic check for manual trigger
         while True:
-            try:
-                schedule.run_pending()
-                await asyncio.sleep(3600)  # Check every hour
-            except Exception as e:
-                logger.error(f"Scheduler error: {e}")
-                await asyncio.sleep(300)  # Wait 5 minutes on error
+            await asyncio.sleep(3600)
+            await self._check_manual_rotation_trigger()
     
     def _schedule_rotation(self):
         """Wrapper for async rotation"""

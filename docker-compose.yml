@@ -52,13 +52,13 @@ services:
           memory: 256M
 
   auth_service:
-    build: ${SRC_ROOT}/auth
+    build: ${SRC_ROOT}
     dockerfile: Dockerfile
     container_name: auth_service
     expose:
         - "8005"
     volumes:
-        - ${SRC_ROOT}/auth:/app
+        - ${SRC_ROOT}/auth:/app/src
     environment:
         - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
         - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED}
@@ -71,7 +71,7 @@ services:
     depends_on:
       database_service:
         condition: service_healthy
-    command: python -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+    command: python -m uvicorn src.auth.main:app --host 0.0.0.0 --port 8005 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
