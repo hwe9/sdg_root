@@ -468,6 +468,7 @@ class DependencyManager:
             raise
 
     async def _health_check_service(self, service: ServiceDependency) -> bool:
+        breaker = self._get_breaker(service)
         def _probe_sync() -> bool:
             url = f"{service.url}{service.health_endpoint}"
             resp = httpx.get(url, timeout=service.timeout)

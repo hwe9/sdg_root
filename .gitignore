@@ -8,6 +8,10 @@ env/
 .venv/
 venv/
 
+# Secrets
+.env
+secrets/
+
 # Docker
 .dockerignore
 

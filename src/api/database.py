@@ -18,7 +18,7 @@ def _build_db_url() -> str:
     name = os.getenv("POSTGRES_DB", "sdg_pipeline")
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
-DATABASE_URL = _build_db_url
+DATABASE_URL = _build_db_url()
 
 engine = create_engine(
     DATABASE_URL,

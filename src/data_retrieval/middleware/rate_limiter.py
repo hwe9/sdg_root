@@ -1,8 +1,3 @@
-"""
-Rate Limiter with robots.txt respect
-Implements polite crawling with domain-specific rate limits
-"""
-
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -20,12 +15,29 @@ class RateLimiter:
     """
 
     def __init__(self):
-        self.domain_delays = {} # domain -> (last_request_time, delay_seconds)
-        self.robots_cache = {} # domain -> RobotFileParser
-        self.default_delay = 1.0 # Default 1 second between requests
-        self.max_delay = 60.0 # Maximum delay
-        self.cache_ttl = 3600 # Cache robots.txt for 1 hour
+       def __init__(
+        self,
+        global_rps: float = 10.0,
+        per_domain_rps: float = 1.5,
+        robots_respect: bool = True,
+        robots_default_delay: float = 1.0,
+        jitter_ms: int = 200
+    ):
+        self.domain_delays = {}
+        self.robots_cache = {}
+        self.default_delay = max(robots_default_delay, 1.0 / max(per_domain_rps, 0.001))
+        self.max_delay = 60.0
+        self.cache_ttl = 3600
         self.session = None
+        self.global_rps = global_rps
+        self.per_domain_rps = per_domain_rps
+        self.robots_respect = robots_respect
+        self.jitter_ms = jitter_ms
+
+        logger.info(
+            f"RateLimiter configured: global_rps={global_rps}, per_domain_rps={per_domain_rps}, "
+            f"robots_respect={robots_respect}, default_delay={self.default_delay:.2f}s"
+        )
 
     async def initialize(self):
         """Initialize rate limiter"""

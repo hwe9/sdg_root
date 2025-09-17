@@ -12,7 +12,8 @@ def split_files_by_structure(base_path, output_base_path):
         'requirements-security.txt',
         '.env',
         '.gitignore',
-        'nginx/nginx.conf'
+        'nginx/nginx.conf',
+        'redis/redis.conf'
     ]
     
     base_output_file = os.path.join(output_base_path, 'sdg_root_base_files.txt')

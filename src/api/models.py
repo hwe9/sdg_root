@@ -151,7 +151,7 @@ class Article(Base):
     publisher = Column(String)
     doi = Column(String, unique=True)
     isbn = Column(String, unique=True)
-    region = Column(Text(100), index=True)
+    region = Column(String(100), index=True)
     country_code = Column(String(3), index=True) 
     language = Column(String(5), default="en", index=True) 
     
@@ -193,7 +193,7 @@ class Article(Base):
 
 class ArticleChunk(Base):
     __tablename__ = "article_chunks"
-    id = Column(Integer, primary_key=True, index=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     article_id = Column(Integer, ForeignKey("articles.id"))
     chunk_id = Column(Integer)
     chunk_order = Column(Integer, index=True)

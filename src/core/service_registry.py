@@ -20,7 +20,7 @@ class ServiceRegistry:
                           method: str = "GET", **kwargs):
         try:
             url = f"{self._base_url(service_name)}{endpoint}"
-            resp = await self._client.request(method.upper(), url, **kwargs)
+            resp = await self.client.request(method.upper(), url, **kwargs)
             resp.raise_for_status()
             return resp.json()
                 
@@ -31,7 +31,7 @@ class ServiceRegistry:
     async def health_check_all(self) -> Dict[str, str]:
         """Check health of all services"""
         results = {}
-        for service_name in self.services:
+        for service_name in dependency_manager.services:
             try:
                 health = await self.call_service(service_name, "/health")
                 results[service_name] = health.get("status", "unknown") if health else "unhealthy"
