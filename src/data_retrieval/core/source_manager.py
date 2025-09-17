@@ -1,7 +1,7 @@
 import os
 import csv
 import logging
-import asyncio, inspect
+import aiohttp, asyncio, inspect
 from datetime import datetime
 from typing import Set, Dict, Any, Optional, List
 from urllib.parse import urlparse
@@ -65,6 +65,37 @@ class SourceManager:
             logger.error(f"❌ Error loading sources: {e}")
             return set()
     
+    async def validate_all_sources(self) -> List[Dict[str, Any]]:
+        urls = await self.get_all_sources()
+        results = []
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        headers = {"User-Agent": "SDG-Pipeline-Bot/2.0 (+https://sdg-pipeline.org/bot)"}
+
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            for url in urls:
+                status = "unknown"
+                reason = ""
+                try:
+                    # Erst HEAD versuchen, dann Fallback GET mit kleinem Body
+                    async with session.head(url, allow_redirects=True) as resp:
+                        status = "ok" if resp.status < 400 else f"http_{resp.status}"
+                except Exception as e:
+                    try:
+                        async with session.get(url, allow_redirects=True) as resp:
+                            status = "ok" if resp.status < 400 else f"http_{resp.status}"
+                    except Exception as e2:
+                        status = "error"
+                        reason = str(e2)
+
+                results.append({
+                    "url": url,
+                    "status": status,
+                    "reason": reason
+                })
+
+        return results
+
     async def get_processed_urls(self) -> Set[str]:
         """Get set of already processed URLs with caching"""
         current_time = datetime.utcnow()
@@ -144,6 +175,27 @@ class SourceManager:
         except Exception as e:
             logger.error(f"❌ Error downloading {url}: {e}")
             return None
+    async def validate_all_sources(self) -> List[Dict[str, Any]]:
+        """
+        Lightweight accessibility check for all sources.
+        Returns list of {url, reachable: bool, status: str}
+        """
+        results: List[Dict[str, Any]] = []
+        import aiohttp, asyncio
+        urls = await self.get_all_sources()
+        timeout = aiohttp.ClientTimeout(total=15)
+        connector = aiohttp.TCPConnector(limit=20, limit_per_host=5)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            sem = asyncio.Semaphore(10)
+            async def probe(u: str):
+                async with sem:
+                    try:
+                        async with session.head(u, allow_redirects=True) as resp:
+                            results.append({"url": u, "reachable": resp.status < 400, "status": str(resp.status)})
+                    except Exception as e:
+                        results.append({"url": u, "reachable": False, "status": str(e)})
+            await asyncio.gather(*[probe(u) for u in urls])
+        return results
     
     def _determine_source_type(self, url: str) -> str:
         """Determine the appropriate source handler for URL"""

@@ -157,9 +157,6 @@ app = FastAPI(
     title="SDG Content Extraction Service",
     description="Microservice for extracting and analyzing content from multiple sources",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    livespan=livespan
 )
 
 # Add CORS middleware
@@ -199,6 +196,7 @@ async def shutdown_event():
         if hasattr(extractor, 'session') and extractor.session:
             await extractor.session.close()
 # Health check
+@app.get("/health")
 async def health_check():
     """Service health check with dependency status"""
     from ..core.dependency_manager import get_dependency_status

@@ -470,30 +470,24 @@ def _insert_ai_topic_relationships(connection, article_id: int, metadata: Dict[s
 
 def _insert_sdg_target_relationships(connection, article_id: int, metadata: Dict[str, Any]):
     """Insert article-SDG target relationships"""
-    sdg_goals = metadata.get('sdg_goals', [])
-    if not sdg_goals:
-        return
-    
-    for goal_id in sdg_goals:
-        sdg_ids = []
-    
-    # Primary SDG from sdg_id field
+    sdg_ids = []
+
+    # Primary SDG aus sdg_id
     if metadata.get('sdg_id'):
         sdg_ids.append(metadata['sdg_id'])
-    
-    # Additional SDGs from sdg_goals list
+
+    # Zusätzliche SDGs aus sdg_goals
     if metadata.get('sdg_goals'):
         if isinstance(metadata['sdg_goals'], list):
             sdg_ids.extend(metadata['sdg_goals'])
         elif isinstance(metadata['sdg_goals'], int):
             sdg_ids.append(metadata['sdg_goals'])
-    
-    # Remove duplicates and ensure valid range
-    sdg_ids = list(set([sdg for sdg in sdg_ids if isinstance(sdg, int) and 1 <= sdg <= 17]))
-    
+
+    # Deduplizieren und auf gültigen Bereich 1..17 prüfen
+    sdg_ids = list(set([g for g in sdg_ids if isinstance(g, int) and 1 <= g <= 17]))
+
     for sdg_id in sdg_ids:
-        confidence_score = metadata.get('sdg_confidence', 0.8)  # Default confidence
-        
+        confidence_score = metadata.get('sdg_confidence', 0.8)
         connection.execute(
             text("""
                 INSERT INTO articles_sdg_targets (article_id, sdg_id, confidence_score) 

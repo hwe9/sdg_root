@@ -79,17 +79,16 @@ class HTTPDownloadStrategy(DownloadStrategy):
                 url,
                 allow_redirects=True,
                 headers={
-                    'Accept': 'application/pdf,text/html,application/xml,text/plain',
+                    'Accept': 'application/pdf,text/html,application/xml,text/plain,application/json',  # <- JSON ergänzt
                     'Accept-Encoding': 'gzip, deflate',
                     'Connection': 'close'
                 }
             ) as response:
                 response.raise_for_status()
-                
-                # Validate content type
+
                 content_type = response.headers.get('content-type', '').lower()
-                allowed_types = ['application/pdf', 'text/html', 'text/plain', 'application/xml']
-                
+                allowed_types = ['application/pdf', 'text/html', 'text/plain', 'application/xml', 'application/json']  # <- JSON ergänzt
+
                 if not any(allowed_type in content_type for allowed_type in allowed_types):
                     logger.warning(f"Disallowed content type: {content_type}")
                     return None

@@ -13,7 +13,10 @@ def split_files_by_structure(base_path, output_base_path):
         '.env',
         '.gitignore',
         'nginx/nginx.conf',
-        'redis/redis.conf'
+        'redis/redis.conf',
+        'secrets/app_db_password.txt',
+        'secrets/postgress_password.txt',
+        'secrets/weaviate_api_key.txt'
     ]
     
     base_output_file = os.path.join(output_base_path, 'sdg_root_base_files.txt')

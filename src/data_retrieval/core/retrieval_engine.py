@@ -63,53 +63,57 @@ class RetrievalEngine:
             logger.error(f"❌ Failed to initialize retrieval engine: {e}")
             raise
     
-    async def run_retrieval(self, 
-                          sources: Optional[List[str]] = None,
-                          force_refresh: bool = False,
-                          max_concurrent: int = 5) -> RetrievalStats:
+    async def run_retrieval(
+        self,
+        sources: Optional[List[str]] = None,
+        force_refresh: bool = False,
+        max_concurrent: int = 5,
+        filter_region: Optional[str] = None,  
+        sdg_goals: Optional[List[int]] = None 
+    ) -> RetrievalStats:
         if self.is_running:
             logger.warning("Retrieval already in progress")
             return self.current_stats
-        
+
         self.is_running = True
-        self.current_stats = RetrievalStats(start_time=datetime.utcnow())
-        
+        self.current_stats = RetrievalStats()
+
         try:
             logger.info("🚀 Starting enhanced retrieval process...")
-            
-            # Get sources to process
+
+            # Quellen ermitteln
             if sources:
                 source_urls = set(sources)
             else:
                 source_urls = await self.source_manager.get_all_sources()
-            
+
             self.current_stats.total_sources = len(source_urls)
-            
-            # Filter already processed URLs if not forcing refresh
+
+            # Bereits verarbeitete URLs filtern (falls nicht force_refresh)
             if not force_refresh:
                 processed_urls = await self.source_manager.get_processed_urls()
                 new_urls = source_urls - processed_urls
                 self.current_stats.skipped_count = len(source_urls) - len(new_urls)
                 source_urls = new_urls
-            
+
+            # Optionale Filter nur protokollieren (keine URL-Metadaten verfügbar)
+            if filter_region:
+                logger.info(f"Region filter requested: {filter_region} (no-op at URL stage)")
+            if sdg_goals:
+                logger.info(f"SDG filter requested: {sdg_goals} (no-op at URL stage)")
+
             if not source_urls:
                 logger.info("🔄 No new URLs to process")
                 return self.current_stats
-            
+
             logger.info(f"📥 Processing {len(source_urls)} URLs with {max_concurrent} concurrent workers")
-            
-            # Process URLs with controlled concurrency
+
             semaphore = asyncio.Semaphore(max_concurrent)
-            tasks = [
-                self._process_single_url(url, semaphore) 
-                for url in source_urls
-            ]
-            
+            tasks = [self._process_single_url(url, semaphore) for url in source_urls]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
+
             processed_data = []
-            for i, result in enumerate(results):
+            for result in results:
                 if isinstance(result, Exception):
                     logger.error(f"❌ Task failed: {result}")
                     self.current_stats.failed_count += 1
@@ -118,23 +122,19 @@ class RetrievalEngine:
                     self.current_stats.success_count += 1
                 else:
                     self.current_stats.failed_count += 1
-                
+
                 self.current_stats.processed_count += 1
-            
-            # Save processed data
+
             await self._save_processed_data(processed_data)
-            
-            # Signal processing service
             await self._signal_processing_service(processed_data)
-            
+
             self.current_stats.end_time = datetime.utcnow()
             self.last_run_time = self.current_stats.end_time
-            
+
             logger.info(f"✅ Retrieval completed: {self.current_stats.success_count} successful, "
-                       f"{self.current_stats.failed_count} failed, {self.current_stats.skipped_count} skipped")
-            
+                        f"{self.current_stats.failed_count} failed, {self.current_stats.skipped_count} skipped")
             return self.current_stats
-            
+
         except Exception as e:
             logger.error(f"❌ Retrieval process failed: {e}")
             self.current_stats.end_time = datetime.utcnow()
@@ -235,6 +235,10 @@ class RetrievalEngine:
             logger.info(f"🔔 Signaled processing service: {len(processed_data)} items ready")
         except Exception as e:
             logger.error(f"❌ Failed to signal processing service: {e}")
+
+    def get_active_worker_count(self) -> int:
+        # Could be refined to reflect active asyncio tasks
+        return 0
     
     def get_status(self) -> Dict[str, Any]:
         return {

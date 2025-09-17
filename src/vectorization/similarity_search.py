@@ -51,6 +51,27 @@ class SimilaritySearch:
             17: [9, 16] # Partnerships links
         }
         return interlinkages
+
+
+    async def search(
+        self,
+        query: str,
+        search_type: str = "general",
+        language: str = "en",
+        region: Optional[str] = None,
+        sdg_goals: Optional[List[int]] = None,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        
+        return await self.semantic_search(
+            query=query,
+            search_type=search_type,
+            language=language,
+            region=region,
+            sdg_goals=sdg_goals,
+            limit=limit
+        )
+
     
     async def semantic_search(self, 
                             query: str,
