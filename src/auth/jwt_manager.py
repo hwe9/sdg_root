@@ -28,6 +28,8 @@ class JWTManager:
             # Try to load existing keys from secrets manager
             private_key_pem = secrets_manager.get_secret("JWT_PRIVATE_KEY")
             public_key_pem = secrets_manager.get_secret("JWT_PUBLIC_KEY")
+            if not private_key_pem or not public_key_pem:
+                raise ValueError("JWT keys not configured")
             
             private_key = serialization.load_pem_private_key(
                 private_key_pem.encode(),

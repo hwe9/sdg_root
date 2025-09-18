@@ -10,3 +10,4 @@ lxml==4.9.3
 html5lib==1.1
 python-dateutil==2.8.2
 asyncio==3.4.3
+prometheus-client>=0.20.0

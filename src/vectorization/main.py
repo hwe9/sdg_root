@@ -1,8 +1,4 @@
 # src/vectorization/main.py
-"""
-SDG Vectorization Service - FastAPI Application
-Microservice for embedding generation, vector storage, and semantic search
-"""
 import os
 import logging
 import sys
@@ -152,7 +148,8 @@ async def _setup_vectorization_dependencies():
                 "embedded": False,
                 "max_connections": int(os.environ.get("WEAVIATE_MAX_CONNECTIONS", "10")),
                 "retry_attempts": int(os.environ.get("WEAVIATE_RETRY_ATTEMPTS", "3")),
-                "retry_delay": float(os.environ.get("WEAVIATE_RETRY_DELAY", "1.0"))
+                "retry_delay": float(os.environ.get("WEAVIATE_RETRY_DELAY", "1.0")),
+                "api_key": os.environ.get("WEAVIATE_API_KEY"), 
             }
             
             # Validate Weaviate URL

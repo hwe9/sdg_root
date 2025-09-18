@@ -1,7 +1,9 @@
 # /sdg_root/src/auth/config.py
 import os
 from enum import Enum
-from pydantic import BaseSettings
+from typing import List
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Environment(str, Enum):
     DEVELOPMENT = "development"
@@ -11,22 +13,25 @@ class Environment(str, Enum):
 class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
-    
-    # Security settings
-    allowed_origins: list = []
+    allowed_origins: list[str] = []
     jwt_algorithm: str = "RS256"
     password_min_length: int = 8
-    
-    # Rate limiting
     rate_limit_per_minute: int = 60
     auth_rate_limit_per_minute: int = 5
-    
-    # File upload limits
     max_file_size_mb: int = 50
     allowed_file_types: list = [".pdf", ".txt", ".docx", ".csv"]
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"
+    )
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def split_csv(cls, v):
+        if isinstance(v, str) and v.strip() and not v.strip().startswith("["):
+            return [s.strip() for s in v.split(",")]
+        return v
 
 settings = Settings()

@@ -156,11 +156,7 @@ class DependencyManager:
             asyncio.run(self._ensure_db())
         return self._SessionLocal()
     class _VectorClientAdapter:
-        """
-        Minimal adapter to match data_processing expectation:
-        insert_data(data: dict, class_name: str, vector: list)
-        Internally uses weaviate.Client.data_object.create(...)
-        """
+        
         def __init__(self, weaviate_client):
             self._client = weaviate_client
 
@@ -249,7 +245,7 @@ class DependencyManager:
             "weaviate": ServiceDependency(
                 name="weaviate",
                 url=os.getenv("WEAVIATE_URL", "http://weaviate_service:8080"),
-                health_endpoint="/v1/meta",
+                health_endpoint="/v1/.well-known/ready",
                 required=True,
                 dependencies=["weaviate_transformer"]
             ),
@@ -468,7 +464,19 @@ class DependencyManager:
             raise
 
     async def _health_check_service(self, service: ServiceDependency) -> bool:
+        if service.name == "database":
+            for attempt in range(service.retry_attempts):
+                try:
+                    ok = await self._check_database_health()
+                    if ok:
+                        return True
+                except Exception as e:
+                    logger.warning(f"Database health check (attempt {attempt+1}) failed: {e}")
+                await asyncio.sleep(self._backoff_delay(attempt))
+            return False
+
         breaker = self._get_breaker(service)
+
         def _probe_sync() -> bool:
             url = f"{service.url}{service.health_endpoint}"
             resp = httpx.get(url, timeout=service.timeout)

@@ -33,6 +33,7 @@ def get_database_url():
 
 DATABASE_URL = get_database_url()
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
+WEAVIATE_API_KEY = os.environ.get("WEAVIATE_API_KEY")
 
 def get_database_engine():
     """Create robust database engine with dependency validation"""
@@ -139,17 +140,18 @@ def get_db_connection():
             logger.error(f"Unexpected database error: {e}")
             raise
 
+def _probe(url: str, timeout: float, is_meta: bool) -> httpx.Response:
+    headers = {"Accept": "application/json"} if is_meta else None
+    return httpx.get(url, timeout=timeout, headers=headers)
+
+
 def _check_weaviate_health(base_url: str, timeout: float = 5.0) -> bool:
-    """
-    Check Weaviate readiness using /.well-known/ready or /v1/.well-known/ready,
-    with /v1/meta as a fallback for older healthcheck styles.
-    """
     base = base_url.rstrip("/")
     endpoints = ["/.well-known/ready", "/v1/.well-known/ready", "/v1/meta"]
     for path in endpoints:
         url = f"{base}{path}"
         try:
-            resp = httpx.get(url, timeout=timeout)
+            resp = _probe(url, timeout, path.endswith("/meta"))
             if resp.status_code == 200:
                 return True
         except Exception:
@@ -163,14 +165,14 @@ def get_weaviate_client():
             f"Weaviate not ready at {WEAVIATE_URL}; readiness check failed (/.well-known/ready or /v1/meta)"
         )
     try:
-        client = weaviate.Client(url=WEAVIATE_URL)
+        auth = weaviate.AuthApiKey(api_key=WEAVIATE_API_KEY) if WEAVIATE_API_KEY else None
+        client = weaviate.Client(url=WEAVIATE_URL, auth_client_secret=auth)
 
         # Ensure schema class exists (Schema-Erzeugung beibehalten)
         try:
             client.schema.get("ArticleVector")
         except weaviate.exceptions.UnexpectedStatusCodeException:
             _create_weaviate_schema(client)
-
         return client
     except Exception as e:
         logger.error(f"Failed to connect to Weaviate: {e}")
