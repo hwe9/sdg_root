@@ -1,7 +1,8 @@
 # /sdg_root/src/auth/config.py
 import os
+import json
 from enum import Enum
-from typing import List
+from typing import List, Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,14 +25,36 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
+        env_aliases={"allowed_origins": ["ALLOWED_ORIGINS", "ALLOWEDORIGINS"]},
     )
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
-    def split_csv(cls, v):
-        if isinstance(v, str) and v.strip() and not v.strip().startswith("["):
-            return [s.strip() for s in v.split(",")]
-        return v
+    def parse_allowed_origins(cls, v: Any):
+        # None -> []
+        if v is None:
+            return []
+        # Already a sequence
+        if isinstance(v, (list, tuple)):
+            return [str(x).strip() for x in v if str(x).strip()]
+        # String input: allow CSV or JSON list; tolerate empty string
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    data = json.loads(s)
+                    return [str(x).strip() for x in data if str(x).strip()]
+                except Exception:
+                    # Fall through to CSV parsing
+                    pass
+            return [x.strip() for x in s.split(",") if x.strip()]
+        # Fallback: coerce to list[str] or empty
+        try:
+            return [str(v).strip()] if str(v).strip() else []
+        except Exception:
+            return []
 
 settings = Settings()

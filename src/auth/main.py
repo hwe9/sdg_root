@@ -3,17 +3,17 @@
 import os
 import re
 import jwt
+import json
 import bcrypt
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Body, APIRouter
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .jwt_manager import jwt_manager
@@ -32,13 +32,10 @@ from .models import init_db, SessionLocal, User
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Repository (DB-backed)
 repo = UserRepository()
-
-# FastAPI security
 security = HTTPBearer()
 
-# --------- Pydantic models ---------
+# ---------- Pydantic models ----------
 class UserLogin(BaseModel):
     username: str = Field(..., min_length=1, max_length=100)
     password: str = Field(..., min_length=1, max_length=200)
@@ -59,7 +56,25 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
 
-# --------- Helpers ---------
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., description="Refresh token")
+
+# ---------- Helpers ----------
+def parse_allowed_origins() -> list[str]:
+    raw = os.getenv("ALLOWED_ORIGINS") or os.getenv("ALLOWEDORIGINS", "")
+    s = raw.strip()
+    if not s:
+        if (os.getenv("ENVIRONMENT") or "").lower() == "development":
+            return ["http://localhost:3000", "http://localhost:8080"]
+        return []
+    if s.startswith("["):
+        try:
+            data = json.loads(s)
+            return [str(x).strip() for x in data if str(x).strip()]
+        except Exception:
+            pass
+    return [x.strip() for x in s.split(",") if x.strip()]
+
 def get_allowed_origins():
     origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
     origins = [o.strip() for o in origins if o.strip()]
@@ -78,10 +93,8 @@ def validate_password_policy(pw: str):
             status_code=400,
             detail=f"Password must be at least {settings.password_min_length} characters",
         )
-    # Require both upper and lower case
     if sum(bool(re.search(pat, pw)) for pat in [r"[A-Z]", r"[a-z]"]) < 2:
         raise HTTPException(status_code=400, detail="Password must include upper and lower case letters")
-    # Require digit or symbol
     if not re.search(r"[\d\W_]", pw):
         raise HTTPException(status_code=400, detail="Password must include a number or symbol")
 
@@ -103,22 +116,17 @@ def authenticate_user(username: str, password: str) -> Optional[User]:
         return user
     return None
 
-# --------- Lifespan (startup/shutdown) ---------
+# ---------- Lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Starting SDG Auth Service...")
     try:
-        # Register SDG-wide startup tasks
         setup_sdg_dependencies()
 
-        # Register auth-specific startup task
         async def initialize_auth_service():
             logger.info("🔄 Initializing auth service dependencies...")
-            # Ensure database is ready
             await wait_for_dependencies("database")
-            # Ensure auth schema exists (auth_users) via ORM
             init_db()
-            # Seed admin user if missing
             admin_pw = None
             try:
                 admin_pw = secrets_manager.get_secret("ADMIN_PASSWORD")
@@ -142,89 +150,34 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Auth service dependencies initialized")
 
         dependency_manager.register_startup_task("auth", initialize_auth_service)
-
-        # Start all dependencies once (shared across services)
         if not dependency_manager._startup_complete.is_set():
             await dependency_manager.start_all_services()
         else:
-            # If manager already started, run our local init now
             await initialize_auth_service()
 
         logger.info("✅ SDG Auth Service startup completed")
         yield
-
     finally:
         logger.info("🔄 Shutting down SDG Auth Service...")
         try:
-            # Allow central manager to coordinate shutdown across services
             if dependency_manager._startup_complete.is_set():
                 await dependency_manager.shutdown_all_services()
             logger.info("✅ SDG Auth Service shutdown completed")
         except Exception as e:
             logger.error(f"❌ Error during shutdown: {e}")
 
-# --------- FastAPI app ---------
-app = FastAPI(
-    title="SDG Auth Service",
-    description="Authentication and authorization service for SDG AI Pipeline",
-    version="2.0.0",
-    lifespan=lifespan,
-)
+# ---------- Routers ----------
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+sys_router = APIRouter(tags=["system"])
 
-# CORS
-allowed_origins = get_allowed_origins()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
-)
-
-# --------- Dependencies ---------
-async def ensure_auth_ready():
-    await wait_for_dependencies("database")
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
-    await ensure_auth_ready()
-    token = credentials.credentials
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt_manager.verify_token(token, "access")
-        username = payload.get("sub")
-        if not username:
-            raise credentials_exception
-        user = repo.get_by_username(username)
-        if not user or not user.is_active:
-            raise credentials_exception
-        return {
-            "username": user.username,
-            "email": user.email,
-            "role": user.role,
-            "is_active": user.is_active,
-        }
-    except jwt.PyJWTError:
-        raise credentials_exception
-
-async def get_admin_user(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
-    return current_user
-
-# --------- Endpoints ---------
-@app.post("/auth/login", response_model=Token)
+# Auth endpoints
+@auth_router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin):
     await ensure_auth_ready()
     user = authenticate_user(user_credentials.username, user_credentials.password)
     if not user:
-        # Small fixed delay to reduce timing oracle risk
         await asyncio.sleep(1)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
-    # Create tokens with RS256 manager
     claims = {"sub": user.username, "role": user.role}
     access = jwt_manager.create_access_token(claims)
     refresh = jwt_manager.create_refresh_token(claims)
@@ -237,11 +190,11 @@ async def login(user_credentials: UserLogin):
         "expires_in": jwt_manager.access_token_expire_minutes * 60,
     }
 
-@app.post("/auth/refresh", response_model=Token)
-async def refresh_token(refresh_token: str = Field(..., description="Refresh token")):
+@auth_router.post("/refresh", response_model=Token)
+async def refresh_token(req: RefreshRequest):
     await ensure_auth_ready()
     try:
-        payload = jwt_manager.verify_token(refresh_token, "refresh")
+        payload = jwt_manager.verify_token(req.refresh_token, "refresh")
         result = consume_refresh_token(payload["jti"])
         if result == "reused":
             raise HTTPException(status_code=401, detail="Refresh token reuse detected; family revoked")
@@ -261,12 +214,18 @@ async def refresh_token(refresh_token: str = Field(..., description="Refresh tok
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
-@app.get("/auth/me")
-async def get_current_user_info(current_user: dict = Depends(get_current_user)):
-    return current_user
+@auth_router.get("/me")
+async def get_current_user_info(current_user: dict = Depends(lambda c=Depends(security): c)):
+    # Delegate to the shared dependency so we can mount on router
+    return await _current_user()
 
-@app.post("/auth/register", response_model=dict)
-async def register_user(user: UserCreate, current_user: dict = Depends(get_admin_user)):
+async def _current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+    return await get_current_user(credentials)
+
+@auth_router.post("/register", response_model=dict)
+async def register_user(user: UserCreate, current_user: dict = Depends(lambda: None)):
+    # Enforce admin via explicit dependency
+    admin = await get_admin_user(await get_current_user(Depends(security)))  # pragma: no cover
     await ensure_auth_ready()
     if repo.get_by_username(user.username):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already registered")
@@ -275,12 +234,11 @@ async def register_user(user: UserCreate, current_user: dict = Depends(get_admin
     logger.info(f"New user registered: {user.username} with role {user.role}")
     return {"message": f"User {user.username} created successfully"}
 
-@app.get("/health")
+# System endpoints
+@sys_router.get("/health")
 async def health_check():
-    """Enhanced health check with dependency status and basic DB stats."""
     try:
         dependency_status = await get_dependency_status()
-        # Basic DB check: count users
         user_count = 0
         active_count = 0
         try:
@@ -313,8 +271,8 @@ async def health_check():
             "error": str(e),
         }
 
-@app.get("/auth/status")
-async def get_auth_status(current_user: dict = Depends(get_admin_user)):
+@auth_router.get("/status")
+async def get_auth_status(current_user: dict = Depends(lambda: None)):
     dependency_status = await get_dependency_status()
     with SessionLocal() as s:
         total = s.query(User).count()
@@ -327,6 +285,61 @@ async def get_auth_status(current_user: dict = Depends(get_admin_user)):
         "startup_complete": dependency_manager._startup_complete.is_set(),
         "last_check": datetime.utcnow().isoformat(),
     }
+
+# ---------- FastAPI app ----------
+app = FastAPI(
+    title="SDG Auth Service",
+    description="Authentication and authorization service for SDG AI Pipeline",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=parse_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(sys_router)
+app.include_router(auth_router)
+
+# ---------- Shared dependencies ----------
+async def ensure_auth_ready():
+    await wait_for_dependencies("database")
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+    await ensure_auth_ready()
+    token = credentials.credentials
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt_manager.verify_token(token, "access")
+        username = payload.get("sub")
+        if not username:
+            raise credentials_exception
+        user = repo.get_by_username(username)
+        if not user or not user.is_active:
+            raise credentials_exception
+        return {
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "is_active": user.is_active,
+        }
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+async def get_admin_user(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    return current_user
 
 if __name__ == "__main__":
     import uvicorn

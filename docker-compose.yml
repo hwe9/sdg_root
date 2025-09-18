@@ -63,6 +63,7 @@ services:
     environment:
       - PYTHONPATH=/app
       - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
       - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
       - DATABASE_URL=${DATABASE_URL}
       - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED:-}
@@ -76,7 +77,9 @@ services:
     depends_on:
       database_service:
         condition: service_healthy
-    command: python -m uvicorn src.auth.main:app --host 0.0.0.0 --port 8005 --reload
+      db_bootstrap:
+        condition: service_completed_successfully
+    command: ["python", "-m", "uvicorn", "src.auth.main:app", "--host", "0.0.0.0", "--port", "8005"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
@@ -119,6 +122,8 @@ services:
     depends_on:
       database_service:
         condition: service_healthy
+      db_bootstrap:
+        condition: service_completed_successfully
       auth_service:
         condition: service_healthy
       redis:
@@ -145,7 +150,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_PASSWORD=S{POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB:-sdg_pipeline}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --locale=en_US.UTF-8
       - POSTGRES_SHARED_PRELOAD_LIBRARIES=pg_stat_statements
@@ -155,8 +160,6 @@ services:
       - DEPENDENCY_MANAGER_ENABLED=true
       - HEALTH_CHECK_INTERVAL=60
       - MAX_STARTUP_TIME=300
-    secrets:
-      - postgres_password
     volumes:
       - ${DATABASE_SERVICE_VOLUMES}
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -180,7 +183,6 @@ services:
 
   db_bootstrap:
     image: postgres:16-alpine
-    container_name: db_bootstrap
     depends_on:
       database_service:
         condition: service_healthy
@@ -188,36 +190,24 @@ services:
       - PGHOST=database_service
       - PGPORT=5432
       - PGUSER=${POSTGRES_USER:-postgres}
-      - PGPASSWORD_FILE=/run/secrets/postgres_password
+      - PGPASSWORD=${POSTGRES_PASSWORD}
       - APP_DB_NAME=${POSTGRES_DB:-sdg_pipeline}
-      - APP_DB_USER=${POSTGRES_USER:-sdg_service}
-      - APP_DB_PASSWORD_FILE=/run/secrets/app_db_password
-    secrets:
-      - postgres_password
-      - app_db_password
-    command: >-
-      sh -lc '
-      set -e;
-      export PGPASSWORD="$(cat "$$PGPASSWORD_FILE")";
-      APP_PASS="$(cat "$$APP_DB_PASSWORD_FILE")";
-      psql -h "$$PGHOST" -U "$$PGUSER" -d postgres -v ON_ERROR_STOP=1 <<'SQL'
-      DO
-      $$
-      BEGIN
-        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = current_setting(''APP_DB_USER'', true)) THEN
-            EXECUTE format(''CREATE ROLE %I LOGIN PASSWORD %L'', current_setting(''APP_DB_USER'', true), current_setting(''APP_PASS'', true));
-        END IF;
-        IF NOT EXISTS (SELECT FROM pg_database WHERE datname = current_setting(''APP_DB_NAME'', true)) THEN
-            EXECUTE format(''CREATE DATABASE %I OWNER %I ENCODING ''''UTF8'''' '', current_setting(''APP_DB_NAME'', true), current_setting(''APP_DB_USER'', true));
-        END IF;
-      END
-      $$;
-      SQL
-      '
+      - APP_DB_USER=sdg_service
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD}
+    volumes:
+      - /mnt/gigabyte1tb/SDG/sdg_root/src/api/bootstrap.sql:/bootstrap/bootstrap.sql:ro
+    command:
+      - sh
+      - -lc
+      - >
+        set -euo pipefail;
+        psql -h "${PGHOST}" -U "${PGUSER}" -d postgres -v ON_ERROR_STOP=1
+        -v u="${APP_DB_USER}" -v d="${APP_DB_NAME}" -v p="${APP_DB_PASSWORD}"
+        -f /bootstrap/bootstrap.sql
     restart: "no"
     networks:
       - sdg_internal
-
+  
   weaviate_service:
     image: semitechnologies/weaviate:1.32.2
     container_name: weaviate_service
@@ -253,6 +243,8 @@ services:
     depends_on:
       weaviate_transformer_service:
         condition: service_healthy
+      db_bootstrap:
+        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -310,7 +302,7 @@ services:
     depends_on:
       weaviate_service:
         condition: service_healthy
-    command: python -m uvicorn src.vectorization.main:app --host 0.0.0.0 --port 8003 --reload
+    command: python -m uvicorn src.vectorization.main:app --host 0.0.0.0 --port 8003
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
@@ -333,13 +325,16 @@ services:
       - PYTHONPATH=/app
       - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - DEPENDENCY_MANAGER_ENABLED=true
       - HEALTH_CHECK_INTERVAL=60
       - MAX_STARTUP_TIME=300
     depends_on:
       database_service:
         condition: service_healthy
-    command: python -m uvicorn src.data_retrieval.main:app --host 0.0.0.0 --port 8002
+      db_bootstrap:
+        condition: service_completed_successfully
+    command: ["python", "-m", "uvicorn", "src.data_retrieval.main:app", "--host", "0.0.0.0", "--port", "8002"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s
@@ -376,11 +371,13 @@ services:
     depends_on:
       database_service:
         condition: service_healthy
+      db_bootstrap:
+        condition: service_completed_successfully
       weaviate_service:
         condition: service_healthy
       data_retrieval_service:
         condition: service_healthy
-    command: python -m uvicorn src.data_processing.main:app --host 0.0.0.0 --port 8001 --reload
+    command: python -m uvicorn src.data_processing.main:app --host 0.0.0.0 --port 8001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 45s
@@ -416,8 +413,10 @@ services:
       - MAX_STARTUP_TIME=300
     depends_on:
       database_service:
-        condition: service_healthy
-    command: python -m uvicorn src.content_extraction.main:app --host 0.0.0.0 --port 8004 --reload
+          condition: service_healthy
+      db_bootstrap:
+          condition: service_completed_successfully
+    command: python -m uvicorn src.content_extraction.main:app --host 0.0.0.0 --port 8004
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 30s
@@ -500,7 +499,7 @@ services:
       - MAX_STARTUP_TIME=300
     command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} -h 127.0.0.1 -p 6379 ping | grep PONG"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -531,8 +530,6 @@ services:
     container_name: monitoring_service
     ports:
       - "9090:9090"
-    # Consider replacing this command; it currently runs the migration script
-    # command: python migration_plan.py
     volumes:
       - ${SRC_ROOT}:/app/src
       - ${DATA_ROOT}:/app/data
@@ -585,7 +582,7 @@ services:
       - sdg_internal
 
   url_validator_service:
-    profiles: ["aux"]        
+    profiles: ["aux"]
     build: ${SRC_ROOT}/url_validator
     container_name: url_validator_service
     ports:
