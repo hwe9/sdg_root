@@ -5,12 +5,12 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     postgresql-client \
-    curl \
+    build-essential \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY auth/requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r /tmp/requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel -r requirements.txt
 
 
 COPY auth/ /app/src/auth

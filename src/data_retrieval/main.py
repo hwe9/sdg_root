@@ -11,14 +11,13 @@ import uvicorn
 
 from .core.retrieval_engine import RetrievalEngine
 from .core.source_manager import SourceManager
+from ..core.db_utils import check_database_health
 from ..core.dependency_manager import dependency_manager, wait_for_dependencies, get_dependency_status
 from ..core.error_handler import handle_errors, SDGPipelineError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# Enhanced Request/Response Models
 class RetrievalRequest(BaseModel):
     sources: Optional[list] = Field(None, description="Specific sources to retrieve from")
     force_refresh: bool = Field(False, description="Force refresh of already processed sources")
@@ -48,10 +47,13 @@ async def setup_data_retrieval_dependencies():
     
     # Register this service with dependency manager
     from ..core.dependency_manager import ServiceDependency
+
+    host = os.getenv("SERVICE_HOST", "data_retrieval_service")
+    port = int(os.getenv("SERVICE_PORT", "8002"))
     
     data_retrieval_service = ServiceDependency(
         name="data_retrieval",
-        url=f"http://localhost:{os.getenv('SERVICE_PORT', 8002)}",
+        url=f"http://{host}:{port}",
         health_endpoint="/health",
         required=True,
         dependencies=["database"],
@@ -119,8 +121,22 @@ async def lifespan(app: FastAPI):
         # Setup dependencies
         await setup_data_retrieval_dependencies()
         
-        # Wait for required dependencies (database)
-        await wait_for_dependencies("database")
+        import asyncio, time
+        max_wait = float(os.getenv("DB_STARTUP_MAX_WAIT_SEC", "60"))
+        start_ts = time.time()
+        db_ok = False
+        attempt = 0
+        while time.time() - start_ts < max_wait:
+            attempt += 1
+            try:
+                if check_database_health():
+                    db_ok = True
+                    break
+            except Exception as e:
+                logger.warning(f"DB health check attempt {attempt} failed: {e}")
+            await asyncio.sleep(min(2.0 * attempt, 5.0))
+        if not db_ok:
+            raise RuntimeError("Database not ready within bounded wait; failing fast")
         
         # Initialize components through dependency manager
         if "data_retrieval" in dependency_manager.startup_tasks:
@@ -190,22 +206,25 @@ async def health_check():
     """Comprehensive service health check with dependency status"""
     try:
         dependency_status = await get_dependency_status()
+        local_db_ok = False
 
-        # Gesamtstatus ausschließlich aus dem dependency_manager ableiten
-        overall = dependency_status.get("overall_status", "starting")
+        try:
+            local_db_ok = check_database_health()
+        except Exception:
+            local_db_ok = False
 
-        # Lokale Komponenten als Detail beilegen, aber nicht zur Wertung heranziehen
-        engine_health = retrieval_engine.health_check() if retrieval_engine else {"status": "not_initialized"}
-        source_health = source_manager.health_check() if source_manager else {"status": "not_initialized"}
-
+        engine_ok = retrieval_engine is not None
+        source_ok = source_manager is not None
+        
         return {
-            "status": overall,                           # Single source of truth
+            "status": "healthy" if (engine_ok and source_ok and local_db_ok) else "unhealthy",                           # Single source of truth
             "service": "SDG Data Retrieval Service",
             "version": "2.0.0",
             "timestamp": datetime.utcnow().isoformat(),
             "components": {
-                "retrieval_engine": engine_health,
-                "source_manager": source_health
+                "retrieval_engine": retrieval_engine.health_check() if engine_ok else {"status": "not_initialized"},
+                "source_manager": source_manager.health_check() if source_ok else {"status": "not_initialized"},
+                "database": {"status": "healthy" if local_db_ok else "unhealthy"},
             },
             "dependencies": dependency_status,
             "startup_complete": dependency_manager._startup_complete.is_set()

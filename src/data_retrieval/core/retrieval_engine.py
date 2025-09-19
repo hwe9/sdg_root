@@ -28,36 +28,57 @@ class RetrievalStats:
         return asdict(self)
 
 class RetrievalEngine:
-    
     def __init__(self, source_manager: SourceManager, data_dir: str, processed_file: str):
         self.source_manager = source_manager
         self.data_dir = data_dir
         self.processed_file = processed_file
-        
-        # Initialize components
         self.content_validator = ContentValidator()
+
+        def _env_float(name: str, default: float) -> float:
+            try:
+                return float(os.getenv(name, str(default)))
+            except Exception:
+                return default
+
+        def _env_int(name: str, default: int) -> int:
+            try:
+                return int(os.getenv(name, str(default)))
+            except Exception:
+                return default
+
+        def _env_bool(name: str, default: bool) -> bool:
+            v = os.getenv(name)
+            if v is None:
+                return default
+            v = v.strip().lower()
+            if v in ("1", "true", "yes", "y", "on"):
+                return True
+            if v in ("0", "false", "no", "n", "off"):
+                return False
+            return default
+
         self.rate_limiter = RateLimiter(
-            global_rps=float(os.getenv("RATE_LIMIT_GLOBAL_RPS", "10")),
-            per_domain_rps=float(os.getenv("RATE_LIMIT_PER_DOMAIN_RPS", "1.5")),
-            robots_respect=bool(int(os.getenv("ROBOTS_RESPECT_CRAWL_DELAY", "1"))),
-            robots_default_delay=float(os.getenv("ROBOTS_DEFAULT_DELAY_SEC", "1.0")),
-            jitter_ms=int(os.getenv("RATE_LIMIT_JITTER_MS", "200"))
+            _env_float("RATE_LIMIT_GLOBAL_RPS", 10.0),           
+            _env_float("RATE_LIMIT_PER_DOMAIN_RPS", 1.5),        
+            _env_bool("ROBOTS_RESPECT_CRAWL_DELAY", True),       
+            _env_float("ROBOTS_DEFAULT_DELAY_SEC", 1.0),         
+            _env_int("RATE_LIMIT_JITTER_MS", 200),               
         )
         self.security_validator = SecurityValidator()
-        
-        # Status tracking
         self.current_stats = RetrievalStats()
         self.is_running = False
         self.last_run_time = None
-        
-        # Ensure directories exist
+
         os.makedirs(data_dir, exist_ok=True)
         os.makedirs(os.path.dirname(processed_file), exist_ok=True)
+
+        logger.info("Retrieval engine initialized successfully")
     
     async def initialize(self):
         try:
             await self.source_manager.initialize()
             await self.content_validator.initialize()
+            await self.rate_limiter.initialize()
             logger.info("✅ Retrieval engine initialized successfully")
         except Exception as e:
             logger.error(f"❌ Failed to initialize retrieval engine: {e}")

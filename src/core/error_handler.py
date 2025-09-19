@@ -3,9 +3,10 @@ import traceback
 import sys
 from typing import Any, Dict, Optional, Type
 from functools import wraps
-from datetime import datetime, time
+from datetime import datetime
+import time as time_module
 import asyncio
-
+time = time_module
 logger = logging.getLogger(__name__)
 
 class SDGPipelineError(Exception):
@@ -94,7 +95,7 @@ class CircuitBreaker:
     def call(self, func, *args, **kwargs):
         """Execute function with circuit breaker protection"""
         if self.state == "OPEN":
-            if time.time() - self.last_failure_time > self.recovery_timeout:
+            if time_module.time() - self.last_failure_time > self.recovery_timeout:
                 self.state = "HALF_OPEN"
             else:
                 raise Exception("Circuit breaker is OPEN")
@@ -107,7 +108,7 @@ class CircuitBreaker:
             return result
         except Exception as e:
             self.failure_count += 1
-            self.last_failure_time = time.time()
+            self.last_failure_time = time_module.time()
             
             if self.failure_count >= self.failure_threshold:
                 self.state = "OPEN"

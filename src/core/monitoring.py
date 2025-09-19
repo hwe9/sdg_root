@@ -1,5 +1,5 @@
 import logging
-import time
+import time as time_module
 import aiohttp
 import psutil
 import asyncio
@@ -77,7 +77,7 @@ class HealthChecker:
     async def check_service_health(self, service_name: str, 
                                  check_function) -> Dict[str, Any]:
         """Check health of individual service"""
-        start_time = time.time()
+        start_time = time_module.time()
         
         try:
             if asyncio.iscoroutinefunction(check_function):
@@ -85,7 +85,7 @@ class HealthChecker:
             else:
                 result = check_function()
             
-            response_time = time.time() - start_time
+            response_time = time_module.time() - start_time
             
             health_status = {
                 "service": service_name,
@@ -104,7 +104,7 @@ class HealthChecker:
                 "service": service_name,
                 "status": "error",
                 "error": str(e),
-                "response_time": time.time() - start_time,
+                "response_time": time_module.time() - start_time,
                 "timestamp": datetime.utcnow().isoformat(),
                 "alerts": ["Service check failed"]
             }

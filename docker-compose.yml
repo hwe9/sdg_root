@@ -64,7 +64,7 @@ services:
       - PYTHONPATH=/app
       - REDIS_URL=${REDIS_URL}
       - SECRET_KEY=${SECRET_KEY}
-      - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED}
+      - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED:-}
       - DATABASE_URL=${DATABASE_URL}
       - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
@@ -79,6 +79,8 @@ services:
         condition: service_healthy
       db_bootstrap:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     command: ["python", "-m", "uvicorn", "src.auth.main:app", "--host", "0.0.0.0", "--port", "8005"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
@@ -150,7 +152,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=S{POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB:-sdg_pipeline}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --locale=en_US.UTF-8
       - POSTGRES_SHARED_PRELOAD_LIBRARIES=pg_stat_statements
@@ -235,11 +237,11 @@ services:
     networks:
       - sdg_internal
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -H \"Authorization: Bearer ${WEAVIATE_API_KEY}\" http://localhost:8080/v1/.well-known/ready || exit 1"]
-      interval: 30s
-      timeout: 20s
-      retries: 20
-      start_period: 300s
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/.well-known/ready || exit 1"]
+      interval: 45s
+      timeout: 30s
+      retries: 25
+      start_period: 600s
     depends_on:
       weaviate_transformer_service:
         condition: service_healthy
@@ -323,9 +325,11 @@ services:
       - ${DATA_ROOT}/quelle.txt:/app/quelle.txt
     environment:
       - PYTHONPATH=/app
+      - SERVICE_HOST=data_retrieval_service
       - SERVICE_PORT=8002
       - DATABASE_URL=${DATABASE_URL:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY}
       - DEPENDENCY_MANAGER_ENABLED=true
       - HEALTH_CHECK_INTERVAL=60
       - MAX_STARTUP_TIME=300
@@ -408,6 +412,7 @@ services:
       - WEAVIATE_URL=${WEAVIATE_URL}
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      - SECRET_KEY=${SECRET_KEY}
       - DEPENDENCY_MANAGER_ENABLED=true
       - HEALTH_CHECK_INTERVAL=60
       - MAX_STARTUP_TIME=300

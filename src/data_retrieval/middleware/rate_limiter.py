@@ -10,18 +10,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class RateLimiter:
-    """
-    Rate limiter that respects robots.txt and implements polite crawling
-    """
-
-    def __init__(self):
-       def __init__(
-        self,
-        global_rps: float = 10.0,
-        per_domain_rps: float = 1.5,
-        robots_respect: bool = True,
-        robots_default_delay: float = 1.0,
-        jitter_ms: int = 200
+    def __init__(
+    self,
+    global_rps: float = 10.0,
+    per_domain_rps: float = 1.5,
+    robots_respect: bool = True,
+    robots_default_delay: float = 1.0,
+    jitter_ms: int = 200
     ):
         self.domain_delays = {}
         self.robots_cache = {}

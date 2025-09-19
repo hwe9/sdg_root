@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from ..core.dependency_manager import dependency_manager, wait_for_dependencies, setup_sdg_dependencies
 from contextlib import asynccontextmanager
-from validators import validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,42 +50,29 @@ async def initialize_extractors():
         logger.error(f"Failed to initialize extractors: {e}")
         extractors['web'] = DummyExtractor(config)
 
-
-# Pydantic models
 class ExtractionRequest(BaseModel):
     url: HttpUrl = Field(..., description="Source URL to extract content from")
     source_type: Optional[str] = Field(None, description="Source type hint")
     language: Optional[str] = Field("en", description="Expected content language")
     region: Optional[str] = Field(None, description="Expected content region")
     
-    @validator('url')
-    def validate_url(cls, v):
-        # Enhanced URL validation
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v: HttpUrl):
         url_str = str(v)
-        
-    def validate_url(cls, v):
-        url_str = str(v)
-        
-        # Erweiterte gefährliche Protokolle
         dangerous_protocols = [
-            'file://', 'ftp://', 'javascript:', 'data:', 'gopher://', 
+            'file://', 'ftp://', 'javascript:', 'data:', 'gopher://',
             'ldap://', 'dict://', 'sftp://', 'tftp://', 'telnet://'
         ]
-        
         if any(url_str.lower().startswith(proto) for proto in dangerous_protocols):
             raise ValueError(f'Unsafe URL protocol: {url_str[:20]}')
-        
-        # IP-Adresse-Validierung
         import re
         ip_pattern = r'https?://(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)'
         if re.match(ip_pattern, url_str.lower()):
             raise ValueError('Direct IP addresses not allowed')
-        
-        # Localhost-Validierung
         localhost_patterns = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
         if any(pattern in url_str.lower() for pattern in localhost_patterns):
             raise ValueError('Localhost URLs not allowed')
-        
         return v
 
 # Global extractors with error handling

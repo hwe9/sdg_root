@@ -8,11 +8,12 @@ from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from contextlib import asynccontextmanager
-import httpx
+import httpx, socket
 from datetime import datetime
 from collections import defaultdict
 from prometheus_client import Counter, Gauge, Histogram
 from .error_handler import CircuitBreaker
+from .secrets_manager import secrets_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ class ServiceDependency:
     retry_attempts: int = 3
     retry_delay: float = 2.0
     dependencies: List[str] = field(default_factory=list)
-
+    initial_delay: float = 0.0
 
 class DependencyManager:
     def __init__(self, config: Dict[str, Any] = None):
@@ -183,21 +184,12 @@ class DependencyManager:
 
         def close(self):
             try:
-                # The Python client does not require explicit close,
-                # but keep for symmetry/future change
                 pass
             except Exception:
                 pass
 
     @asynccontextmanager
     async def get_vector_client(self):
-        """
-        Async context manager that yields a _VectorClientAdapter instance.
-        This matches usage in data_processing/core/db_utils:
-            async with dep_manager.get_vector_client() as vector_client:
-                vector_client.insert_data(...)
-        """
-        # Resolve URL/API key lazily
         async with self._vector_lock:
             if not self._vector_url:
                 self._vector_url = os.getenv("WEAVIATE_URL", "http://weaviate_service:8080")
@@ -228,16 +220,13 @@ class DependencyManager:
                 adapter.close()
             except Exception:
                 pass
-
-    # ------------------------------
-    # Registration and orchestration
-    # ------------------------------
+            
     def _register_core_services(self):
         """Register core SDG pipeline services"""
         core_services = {
             "database": ServiceDependency(
                 name="database",
-                url="postgresql://localhost:5432",
+                url="postgresql://database_service:5432",
                 health_endpoint="/",  # Custom health check
                 required=True,
                 dependencies=[]
@@ -247,7 +236,10 @@ class DependencyManager:
                 url=os.getenv("WEAVIATE_URL", "http://weaviate_service:8080"),
                 health_endpoint="/v1/.well-known/ready",
                 required=True,
-                dependencies=["weaviate_transformer"]
+                timeout=60,
+                retry_attempts=25,
+                retry_delay=2.0,
+                dependencies=["weaviate_transformer"],
             ),
             "weaviate_transformer": ServiceDependency(
                 name="weaviate_transformer",
@@ -255,6 +247,8 @@ class DependencyManager:
                 health_endpoint="/.well-known/ready",
                 required=True,
                 timeout=60,
+                retry_attempts=25,
+                retry_delay=2.0,
                 dependencies=[]
             ),
             "auth": ServiceDependency(
@@ -272,8 +266,12 @@ class DependencyManager:
             "data_retrieval": ServiceDependency(
                 name="data_retrieval",
                 url="http://data_retrieval_service:8002",
+                health_endpoint="/health",
                 required=True,
-                dependencies=["database"]
+                dependencies=["database"],
+                retry_attempts=25,
+                retry_delay=2.0,
+                timeout=20,
             ),
             "data_processing": ServiceDependency(
                 name="data_processing",
@@ -290,16 +288,27 @@ class DependencyManager:
             "content_extraction": ServiceDependency(
                 name="content_extraction",
                 url="http://content_extraction_service:8004",
-                required=False,  # Optional service
-                dependencies=["database"]
+                health_endpoint="/health",
+                required=False, 
+                dependencies=["database"],
+                retry_attempts=10,
+                retry_delay=2.0,
+                timeout=20,
             )
         }
-
-        for service_name, service_dep in core_services.items():
+        for service_dep in core_services.values():
+            if service_dep.name in ("data_retrieval", "content_extraction"):
+                setattr(service_dep, "fail_max", 20)       
+                setattr(service_dep, "reset_timeout", 10)  
             self.register_service(service_dep)
+
+    def _canon(self, name: str) -> str:
+        return (name or "").replace("_", "").lower()
 
     def register_service(self, service: ServiceDependency):
         """Register a service dependency"""
+        service.name = self._canon(service.name)
+        service.dependencies = [self._canon(d) for d in service.dependencies]
         self.services[service.name] = service
         self.service_status[service.name] = ServiceStatus.PENDING
         logger.info(f"Registered service: {service.name}")
@@ -417,10 +426,12 @@ class DependencyManager:
 
         except Exception as e:
             self.service_status[service_name] = ServiceStatus.FAILED
-            logger.error(f"❌ Failed to start service {service_name}: {e}")
-
             if service.required:
+                logger.error(f"❌ Failed to start service {service_name}: {e}")
                 raise Exception(f"Required service {service_name} failed to start: {e}")
+            else:
+                logger.warning(f"Optional service {service_name} not started: {e}")
+                # Do not raise for optional services
 
     async def _wait_for_dependencies(self, service: ServiceDependency):
         """Wait for service dependencies to be healthy"""
@@ -464,37 +475,71 @@ class DependencyManager:
             raise
 
     async def _health_check_service(self, service: ServiceDependency) -> bool:
+        if getattr(service, "initial_delay", 0.0) > 0:
+            await asyncio.sleep(service.initial_delay)
+
         if service.name == "database":
             for attempt in range(service.retry_attempts):
                 try:
-                    ok = await self._check_database_health()
+                    ok = ok = await loop.run_in_executor(None, lambda: breaker.call(_probe_sync))
                     if ok:
                         return True
                 except Exception as e:
-                    logger.warning(f"Database health check (attempt {attempt+1}) failed: {e}")
+                    logger.warning(f"Health check (attempt {attempt+1}) failed for {service.name}: {e}")
                 await asyncio.sleep(self._backoff_delay(attempt))
             return False
 
         breaker = self._get_breaker(service)
 
         def _probe_sync() -> bool:
-            url = f"{service.url}{service.health_endpoint}"
-            resp = httpx.get(url, timeout=service.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("status") in ["healthy", "ok", "ready"]
+            # Robust URL join
+            url = f"{service.url.rstrip('/')}/{service.health_endpoint.lstrip('/')}"
+            headers = {}
 
-        loop = asyncio.get_running_loop()
+            # Attach API key for Weaviate readiness if configured
+            try:
+                if self._canon(service.name) == "weaviate":
+                    api_key = (
+                        os.getenv("WEAVIATE_API_KEY")
+                        or secrets_manager.get_secret("WEAVIATE_API_KEY")
+                        or ""
+                    )
+                    if api_key:
+                        headers["Authorization"] = f"Bearer {api_key}"
+            except Exception:
+                api_key = os.getenv("WEAVIATE_API_KEY", "")
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+
+            resp = httpx.get(url, headers=headers, timeout=service.timeout)
+
+            # Accept 204 No Content readiness
+            if resp.status_code == 204:
+                return True
+
+            # Accept generic 2xx with empty or non-JSON bodies
+            ct = (resp.headers.get("content-type") or "").lower()
+            if 200 <= resp.status_code < 300 and (not ct.startswith("application/json") or not resp.text.strip()):
+                return True
+
+            # If JSON is present, accept common status markers
+            try:
+                data = resp.json()
+                status = str(data.get("status", "")).lower()
+                return (200 <= resp.status_code < 300) and (status in {"healthy", "ok", "ready"})
+            except Exception:
+                return 200 <= resp.status_code < 300
+
         for attempt in range(service.retry_attempts):
             try:
-                ok = await loop.run_in_executor(None, lambda: breaker.call(_probe_sync))
+                ok = await asyncio.to_thread(lambda: breaker.call(_probe_sync))
                 if ok:
                     return True
             except Exception as e:
                 logger.warning(f"Health check (attempt {attempt+1}) failed for {service.name}: {e}")
             await asyncio.sleep(self._backoff_delay(attempt))
         return False
-
+    
     async def _check_database_health(self) -> bool:
         """Custom database health check"""
         try:
