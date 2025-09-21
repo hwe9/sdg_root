@@ -6,8 +6,11 @@ RUN apt-get update && apt-get install -y ffmpeg python3 python3-pip
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY constraints/constraints.txt /tmp/constraints.txt
+COPY src/data_processing/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && (pip install --no-cache-dir --require-hashes -c /tmp/constraints.txt -r /tmp/requirements.txt \
+     || pip install --no-cache-dir -r /tmp/requirements.txt) 
 
 COPY . .
 

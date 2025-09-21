@@ -6,7 +6,9 @@ USER root
 
 # Installiere Debug- und Diagnose-Tools
 # Für Debian/Ubuntu-Basis (bei den meisten KI-Images Standard)
-RUN apt-get update && apt-get install -y wget curl
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends wget curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 # Optional: weitere Tools für wissenschaftliches Debuggen
 # RUN apt-get install -y procps net-tools

@@ -1,0 +1,9 @@
+# API-spezifische Direktabhängigkeiten
+fastapi
+uvicorn[standard]
+SQLAlchemy
+psycopg2-binary
+pydantic
+python-dotenv
+httpx
+python-multipart

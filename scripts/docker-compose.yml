@@ -24,9 +24,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ${SRC_ROOT}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ${SRC_ROOT}/nginx/ssl:/etc/ssl/certs:ro
-      - ${SRC_ROOT}/nginx/logs:/var/log/nginx
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/ssl/certs:ro
+      - ./nginx/logs:/var/log/nginx
     networks:
       - sdg_external
       - sdg_internal
@@ -51,29 +51,25 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  # FIXED: auth_service with correct YAML structure
   auth_service:
     build:
       context: ${SRC_ROOT}
-      dockerfile: src/auth/Dockerfile
+      dockerfile: auth/Dockerfile
     container_name: auth_service
-    restart: unless-stopped
     expose:
       - "8005"
     volumes:
-      - ${SRC_ROOT}:/app:ro
-      - ${SRC_ROOT}/secrets:/app/secrets:ro
+      - ${SRC_ROOT}:/app/src:ro
     environment:
       - PYTHONPATH=/app
       - REDIS_URL=${REDIS_URL}
-      - SECRET_STORE_DIR=/app/secrets
       - SECRET_KEY=${SECRET_KEY}
       - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED:-}
-      - ENCRYPTION_SALT=${ENCRYPTION_SALT}
       - DATABASE_URL=${DATABASE_URL}
       - DATABASE_URL_ENCRYPTED=${DATABASE_URL_ENCRYPTED:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - ENVIRONMENT=${ENVIRONMENT}
-      - SERVICE_NAME=auth
       - DEPENDENCY_MANAGER_ENABLED=true
       - HEALTH_CHECK_INTERVAL=60
       - MAX_STARTUP_TIME=300
@@ -105,7 +101,7 @@ services:
   api_service:
     build:
       context: ${SRC_ROOT}
-      dockerfile: src/api/Dockerfile
+      dockerfile: api/Dockerfile
       args:
         - BUILD_ENV=production
     container_name: api_service
@@ -115,7 +111,7 @@ services:
     expose:
       - "8000"
     volumes:
-      - ${SRC_ROOT}:/app:ro
+      - ${SRC_ROOT}:/app/src:ro
     environment:
       - PYTHONPATH=/app
       - DATABASE_URL=${DATABASE_URL}
@@ -141,10 +137,10 @@ services:
     command: ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -172,8 +168,8 @@ services:
       - MAX_STARTUP_TIME=300
     volumes:
       - ${DATABASE_SERVICE_VOLUMES}
-      - ${SRC_ROOT}/postgres/init:/docker-entrypoint-initdb.d:ro
-      - ${SRC_ROOT}/postgres/backup:/backup
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/backup:/backup
     networks:
       - sdg_internal
     healthcheck:
@@ -192,69 +188,46 @@ services:
           memory: 2G
 
   db_bootstrap:
-  image: postgres:16-alpine
-  depends_on:
-    database_service:
-      condition: service_healthy
-  environment:
-    - PGHOST=database_service
-    - PGPORT=5432
-    - PGUSER=${POSTGRES_USER:-postgres}
-    - PGPASSWORD=${POSTGRES_PASSWORD}
-    - APP_DB_NAME=${POSTGRES_DB:-sdg_pipeline}
-    - APP_DB_USER=sdg_service
-    - APP_DB_PASSWORD=${APP_DB_PASSWORD}
-  volumes:
-    - ${SRC_ROOT}/src/api/bootstrap.sql:/bootstrap/bootstrap.sql:ro
-  command:
-    - sh
-    - -lc
-    - |
-      set -euo pipefail
-
-      # 1) Rolle idempotent anlegen (psql-Variablen; keine DO-Blocks nötig)
-      psql -h "$PGHOST" -U "$PGUSER" -d postgres -v u="$APP_DB_USER" -v p="$APP_DB_PASSWORD" -v ON_ERROR_STOP=1 <<'SQL'
-      SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'u', :'p')
-      WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'u')
-      \gexec
-      SQL
-
-      # 2) Datenbank idempotent anlegen (außerhalb Transaktionen)
-      psql -h "$PGHOST" -U "$PGUSER" -d postgres -v d="$APP_DB_NAME" -v u="$APP_DB_USER" -v ON_ERROR_STOP=1 <<'SQL'
-      SELECT format('CREATE DATABASE %I OWNER %I', :'d', :'u')
-      WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'d')
-      \gexec
-      SQL
-
-      # 3) Rechte in der Ziel-DB setzen (idempotent)
-      psql -h "$PGHOST" -U "$PGUSER" -d "$APP_DB_NAME" -v u="$APP_DB_USER" -v ON_ERROR_STOP=1 -c \
-        'GRANT ALL ON SCHEMA public TO :"u";'
-      psql -h "$PGHOST" -U "$PGUSER" -d "$APP_DB_NAME" -v u="$APP_DB_USER" -v ON_ERROR_STOP=1 -c \
-        'ALTER SCHEMA public OWNER TO :"u";'
-
-      # 4) Projekt-SQL nur einspielen, wenn Datei existiert und nicht leer ist
-      if [ -s /bootstrap/bootstrap.sql ]; then
-        psql -h "$PGHOST" -U "$PGUSER" -d "$APP_DB_NAME" -v ON_ERROR_STOP=1 -f /bootstrap/bootstrap.sql
-      fi
-
-      echo "Bootstrap completed."
-  restart: "no"
-  networks:
-    - sdg_internal
+    image: postgres:16-alpine
+    depends_on:
+      database_service:
+        condition: service_healthy
+    environment:
+      - PGHOST=database_service
+      - PGPORT=5432
+      - PGUSER=${POSTGRES_USER:-postgres}
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - APP_DB_NAME=${POSTGRES_DB:-sdg_pipeline}
+      - APP_DB_USER=sdg_service
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD}
+    volumes:
+      - /mnt/gigabyte1tb/SDG/sdg_root/src/api/bootstrap.sql:/bootstrap/bootstrap.sql:ro
+    command:
+      - sh
+      - -lc
+      - >
+        set -euo pipefail;
+        psql -h "${PGHOST}" -U "${PGUSER}" -d postgres -v ON_ERROR_STOP=1
+        -v u="${APP_DB_USER}" -v d="${APP_DB_NAME}" -v p="${APP_DB_PASSWORD}"
+        -f /bootstrap/bootstrap.sql
+    restart: "no"
+    networks:
+      - sdg_internal
 
   weaviate_transformer_service:
-    image: ${WEAVIATE_IMAGE}              # z.B. semitechnologies/transformers-inference:sentence-transformers-paraphrase-multilingual-MiniLM-L12-v2
+    image: ${WEAVIATE_IMAGE}
     container_name: weaviate_transformer_service
-    restart: unless-stopped
     ports:
-      - "127.0.0.1:8081:8080"             # optional: nur für lokalen Zugriff vom Host nötig
+      - "127.0.0.1:8081:8080"
     environment:
       - ENABLE_GPU=0
       - TORCH_NUM_THREADS=4
       - OMP_NUM_THREADS=4
-    # Healthcheck OHNE curl/wget (Base-Image hat Python sicher an Bord)
+      - DEPENDENCY_MANAGER_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=60
+      - MAX_STARTUP_TIME=300
     healthcheck:
-      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request,sys\ntry:\n  urllib.request.urlopen('http://localhost:8080/.well-known/ready', timeout=5).read()\n  sys.exit(0)\nexcept Exception:\n  sys.exit(1)\nPY"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/.well-known/ready\").read()' || exit 1"]
       interval: 45s
       timeout: 30s
       retries: 25
@@ -269,10 +242,10 @@ services:
     networks:
       - sdg_internal
 
+  # FIXED: weaviate_service with proper indentation and structure
   weaviate_service:
     image: semitechnologies/weaviate:1.32.2
     container_name: weaviate_service
-    restart: unless-stopped
     ports:
       - "8080:8080"
       - "50051:50051"
@@ -280,20 +253,20 @@ services:
       - QUERY_DEFAULTS_LIMIT=25
       - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
       - PERSISTENCE_DATA_PATH=/var/lib/weaviate
-      - DEFAULT_VECTORIZER_MODULE=none             # (Variante B unten siehe Hinweis)
+      - DEFAULT_VECTORIZER_MODULE=none
       - ENABLE_MODULES=text2vec-transformers
       - TRANSFORMERS_INFERENCE_API=http://weaviate_transformer_service:8080
       - CLUSTER_HOSTNAME=node1
       - DISABLE_TELEMETRY=true
     volumes:
-      - ${WEAVIATE_SERVICE_VOLUMES}                # z.B. weaviate_data:/var/lib/weaviate ODER Bind-Mount
+      - ${WEAVIATE_SERVICE_VOLUMES}
     networks:
       - sdg_internal
     depends_on:
       weaviate_transformer_service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:8080/v1/.well-known/ready"]
       interval: 15s
       timeout: 10s
       retries: 20
@@ -301,18 +274,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: '2.0'
           memory: 2G
-        
+
   vectorization_service:
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/vectorization/Dockerfile
+    build: ${SRC_ROOT}/vectorization
     container_name: vectorization_service
     ports:
       - "8003:8003"
     volumes:
-      - ${SRC_ROOT}:/app:ro
+      - ${SRC_ROOT}:/app/src:ro
     environment:
       - PYTHONPATH=/app
       - WEAVIATE_URL=${WEAVIATE_URL}
@@ -339,14 +310,12 @@ services:
       - sdg_internal
 
   data_retrieval_service:
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/data_retrieval/Dockerfile
+    build: ${SRC_ROOT}/data_retrieval
     container_name: data_retrieval_service
     ports:
       - "8002:8002"
     volumes:
-      - ${SRC_ROOT}:/app:ro
+      - ${SRC_ROOT}:/app/src:ro
       - ${DATA_ROOT}/raw_data:/app/raw_data
       - ${DATA_ROOT}/quelle.txt:/app/quelle.txt
     environment:
@@ -379,14 +348,12 @@ services:
       - sdg_internal
 
   data_processing_service:
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/data_processing/Dockerfile
+    build: ${SRC_ROOT}/data_processing
     container_name: data_processing_service
     ports:
       - "8001:8001"
     volumes:
-      - ${SRC_ROOT}:/app:ro
+      - ${SRC_ROOT}:/app/src:ro
       - ${DATA_ROOT}/raw_data:/app/raw_data
       - ${DATA_ROOT}/processed_data:/app/processed_data
       - ${DATA_ROOT}/images:/app/images
@@ -429,8 +396,8 @@ services:
 
   content_extraction_service:
     build:
-      context: ${SRC_ROOT}
-      dockerfile: src/content_extraction/Dockerfile
+      context: ./src/content_extraction
+      dockerfile: Dockerfile
     image: sdg_content_extraction:latest
     pull_policy: never
     container_name: content_extraction_service
@@ -528,7 +495,7 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-      - ${SRC_ROOT}/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     networks:
       - sdg_internal
     environment:
@@ -549,9 +516,7 @@ services:
           memory: 512M
 
   migration_service:
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/migration/Dockerfile
+    build: ${SRC_ROOT}/migration
     container_name: migration_service
     command: python migration_plan.py
     depends_on:
@@ -566,10 +531,8 @@ services:
       - sdg_internal
 
   monitoring_service:
-    profiles: ["aux"]
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/monitoring/Dockerfile
+    profiles: ["aux"]          # do not build by default
+    build: ${SRC_ROOT}/monitoring
     container_name: monitoring_service
     ports:
       - "9090:9090"
@@ -594,10 +557,8 @@ services:
       - monitoring_network
 
   config_service:
-    profiles: ["aux"]
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/config_manager/Dockerfile
+    profiles: ["aux"]          # do not build by default
+    build: ${SRC_ROOT}/config_manager
     container_name: config_service
     ports:
       - "8006:8006"
@@ -612,10 +573,8 @@ services:
       - sdg_internal
 
   error_handler_service:
-    profiles: ["aux"]
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/error_handler/Dockerfile
+    profiles: ["aux"]          # do not build by default
+    build: ${SRC_ROOT}/error_handler
     container_name: error_handler_service
     ports:
       - "8007:8007"
@@ -630,9 +589,7 @@ services:
 
   url_validator_service:
     profiles: ["aux"]
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/url_validator/Dockerfile
+    build: ${SRC_ROOT}/url_validator
     container_name: url_validator_service
     ports:
       - "8008:8008"
@@ -646,9 +603,7 @@ services:
       - sdg_internal
 
   testing_service:
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/testing/Dockerfile
+    build: ${SRC_ROOT}/testing
     container_name: testing_service
     profiles: ["testing"]
     command: pytest --cov=src tests/
@@ -667,10 +622,8 @@ services:
       - sdg_internal
 
   backup_service:
-    profiles: ["aux"]
-    build:
-      context: ${SRC_ROOT}
-      dockerfile: src/backup/Dockerfile
+    profiles: ["aux"]          # do not build by default
+    build: ${SRC_ROOT}/backup
     container_name: backup_service
     volumes:
       - ${DATA_ROOT}:/data
@@ -690,8 +643,8 @@ volumes:
 
 secrets:
   postgres_password:
-    file: ${SRC_ROOT}/secrets/postgres_password.txt
+    file: ./secrets/postgres_password.txt
   app_db_password:
-    file: ${SRC_ROOT}/secrets/app_db_password.txt
+    file: ./secrets/app_db_password.txt
   weaviate_api_key:
-    file: ${SRC_ROOT}/secrets/weaviate_api_key.txt
+    file: ./secrets/weaviate_api_key.txt

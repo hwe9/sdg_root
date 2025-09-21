@@ -1,0 +1,38 @@
+mkdir -p constraints
+cat > constraints/constraints.in <<'EOF'
+
+fastapi==0.111
+uvicorn==0.30
+pydantic==3
+SQLAlchemy
+psycopg2-binary
+alembic
+python-dotenv
+redis
+celery
+python-multipart==0.0.7
+python-jose
+passlib
+python-dateutil
+httpx==0.27
+EOF
+
+for SVC in api auth data_retrieval data_processing content_extraction vectorization migration; do
+  mkdir -p $SVC
+  # jedes Service .in referenziert NUR das zentrale .in
+  cat > $SVC/requirements.in <<'EOF'
+-r ../constraints/constraints.in
+EOF
+done
+
+pip install -q pip-tools
+
+pip-compile --resolver=backtracking --upgrade --generate-hashes \
+  -o constraints/constraints.txt constraints/constraints.in
+
+for SVC in api auth data_retrieval data_processing content_extraction vectorization migration; do
+  pip-compile --resolver=backtracking --generate-hashes \
+    -c constraints/constraints.txt \
+    -o $SVC/requirements.txt \
+    $SVC/requirements.in
+done

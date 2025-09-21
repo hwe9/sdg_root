@@ -1,0 +1,7 @@
+# Migrations-/Hilfsjobs
+pydantic
+SQLAlchemy
+psycopg2-binary
+alembic
+python-dateutil
+python-dotenv

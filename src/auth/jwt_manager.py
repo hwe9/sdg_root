@@ -23,26 +23,35 @@ class JWTManager:
         self.audience = os.getenv("AUTH_AUDIENCE", "sdg-clients")
     
     def _load_or_generate_keys(self):
-        """Load existing RSA key pair or generate new ones"""
         try:
-            # Try to load existing keys from secrets manager
             private_key_pem = secrets_manager.get_secret("JWT_PRIVATE_KEY")
-            public_key_pem = secrets_manager.get_secret("JWT_PUBLIC_KEY")
+            public_key_pem  = secrets_manager.get_secret("JWT_PUBLIC_KEY")
             if not private_key_pem or not public_key_pem:
                 raise ValueError("JWT keys not configured")
-            
-            private_key = serialization.load_pem_private_key(
-                private_key_pem.encode(),
-                password=None
-            )
-            public_key = serialization.load_pem_public_key(public_key_pem.encode())
-            
+            private_key = serialization.load_pem_private_key(private_key_pem.encode(), password=None)
+            public_key  = serialization.load_pem_public_key(public_key_pem.encode())
             logger.info("Loaded existing JWT key pair")
             return private_key, public_key
-            
         except Exception as e:
             logger.warning(f"Could not load existing keys: {e}. Generating new ones.")
-            return self._generate_new_keys()
+            priv, pub = self._generate_new_keys()
+            # Persist PEMs securely (encrypted at rest)
+            try:
+                private_pem = priv.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ).decode()
+                public_pem = pub.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode()
+                secrets_manager.set_secret("JWT_PRIVATE_KEY", private_pem, encrypt=True)
+                secrets_manager.set_secret("JWT_PUBLIC_KEY",  public_pem,  encrypt=True)
+                logger.info("Persisted newly generated JWT key pair")
+            except Exception as pe:
+                logger.error(f"Failed to persist generated JWT keys: {pe}")
+            return priv, pub
     
     def _generate_new_keys(self):
         """Generate new RSA key pair"""

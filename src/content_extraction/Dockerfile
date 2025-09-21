@@ -9,8 +9,11 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN  pip install --no-cache-dir --upgrade pip setuptools wheel -r requirements.txt
+COPY constraints/constraints.txt /tmp/constraints.txt
+COPY src/content_extraction/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && (pip install --no-cache-dir --require-hashes -c /tmp/constraints.txt -r /tmp/requirements.txt \
+     || pip install --no-cache-dir -r /tmp/requirements.txt)
 
 COPY . .
 

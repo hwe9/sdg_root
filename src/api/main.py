@@ -3,12 +3,17 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from .database import get_db, check_database_health
 from . import models, schemas
-from ..core.dependency_manager import dependency_manager, setup_sdg_dependencies, get_dependency_status
+from ..core.dependency_manager import (
+    dependency_manager,
+    setup_sdg_dependencies,
+    get_dependency_status,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,14 +22,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("🚀 Starting SDG API Service...")
     try:
+        # Abhängigkeiten registrieren & orchestriert starten (ohne create_all; Migrationen via Alembic)
         setup_sdg_dependencies()
-        # WICHTIG: Keine create_all() hier – Schema via Alembic migrieren
         await dependency_manager.start_all_services()
         logger.info("✅ SDG API Service started successfully")
         yield
     finally:
         logger.info("🔄 Shutting down SDG API Service...")
         await dependency_manager.shutdown_all_services()
+        logger.info("🛑 SDG API Service shutdown complete")
 
 # Initialize FastAPI app with lifespan
 app = FastAPI(
@@ -50,6 +56,57 @@ def read_root():
         "version": "2.0.0",
         "status": "healthy"
     }
+
+# -------------------------
+# Robust Health Endpoints
+# -------------------------
+
+@app.get("/health")
+async def health_check():
+    """
+    Liefert einen aggregierten Gesundheitszustand:
+    - Datenbank (synchroner Connectivity-Check)
+    - Abhängigkeiten (asynchroner Status aus dependency_manager)
+    Im Fehlerfall wird ein 503 zurückgegeben.
+    """
+    try:
+        db_healthy = check_database_health()
+        deps = await get_dependency_status()  # erwartet ein Dict inkl. 'overall_status'
+        overall_ok = db_healthy and deps.get("overall_status") == "healthy"
+
+        payload = {
+            "status": "healthy" if overall_ok else "unhealthy",
+            "service": "SDG API Service",
+            "version": "2.0.0",
+            "database": "connected" if db_healthy else "disconnected",
+            "dependencies": deps,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        status_code = 200 if overall_ok else 503
+        return JSONResponse(status_code=status_code, content=payload)
+    except Exception as e:
+        logger.exception("Health check error")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "service": "SDG API Service",
+                "version": "2.0.0",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+# Optional: HEAD für schnelle Probes (z. B. NGINX/Container-Healthchecks)
+@app.head("/health")
+async def health_head():
+    try:
+        db_healthy = check_database_health()
+        deps = await get_dependency_status()
+        overall_ok = db_healthy and deps.get("overall_status") == "healthy"
+        return JSONResponse(status_code=200 if overall_ok else 503, content=None)
+    except Exception:
+        return JSONResponse(status_code=503, content=None)
 
 # --- CRUD Endpoints for Articles ---
 
@@ -83,9 +140,11 @@ async def get_article_chunks(
     article = db.query(models.Article).filter(models.Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
+
     query = db.query(models.ArticleChunk).filter(models.ArticleChunk.article_id == article_id)
     if sdg_filter:
-        query = query.filter(models.ArticleChunk.sdg_section == sdg_filter) 
+        query = query.filter(models.ArticleChunk.sdg_section == sdg_filter)
+
     chunks = query.order_by(models.ArticleChunk.chunk_order).limit(limit).all()
     return {
         "article_id": article_id,
@@ -93,22 +152,7 @@ async def get_article_chunks(
         "chunks": chunks
     }
 
-@app.get("/health")
-async def health_check():
-    db_healthy = check_database_health()
-    dependency_status = await get_dependency_status()
-    overall_status = "healthy" if (
-        db_healthy and 
-        dependency_status.get("overall_status") == "healthy"
-    ) else "unhealthy"
-    return {
-        "status": overall_status,
-        "service": "SDG API Service", 
-        "version": "2.0.0",
-        "database": "connected" if db_healthy else "disconnected",
-        "dependencies": dependency_status,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+# --- SDG-bezogene Suche ---
 
 @app.get("/search/sdg/{sdg_id}/chunks")
 async def search_chunks_by_sdg(
@@ -120,16 +164,16 @@ async def search_chunks_by_sdg(
     sdg = db.query(models.Sdg).filter(models.Sdg.id == sdg_id).first()
     if not sdg:
         raise HTTPException(status_code=404, detail="SDG not found")
-    
+
     chunks_query = db.query(models.ArticleChunk).join(models.Article).filter(
         models.Article.sdg_id == sdg_id
     )
-    
+
     if query:
         chunks_query = chunks_query.filter(models.ArticleChunk.text.contains(query))
-    
+
     chunks = chunks_query.limit(limit).all()
-    
+
     return {
         "sdg_id": sdg_id,
         "sdg_name": sdg.name,
@@ -146,21 +190,21 @@ async def get_article_summary(
     article = db.query(models.Article).filter(models.Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-    
-    # Get most relevant chunks (ordered by importance/SDG relevance)
+
+    # Relevante Chunks (z. B. nach chunk_order)
     chunks = db.query(models.ArticleChunk).filter(
         models.ArticleChunk.article_id == article_id
     ).order_by(models.ArticleChunk.chunk_order).limit(max_chunks).all()
-    
+
     if not chunks:
         raise HTTPException(status_code=404, detail="No chunks found for article")
-    
-    # Generate summary from chunks
+
+    # Simple Heuristik: anreißende Zusammenfassung
     summary_text = " ".join([chunk.text[:200] + "..." for chunk in chunks])
-    
-    # Extract SDG information
-    sdg_sections = list(set([chunk.sdg_section for chunk in chunks if chunk.sdg_section]))
-    
+
+    # SDG-Abschnitte extrahieren
+    sdg_sections = list({chunk.sdg_section for chunk in chunks if chunk.sdg_section})
+
     return {
         "article_id": article_id,
         "article_title": article.title,
@@ -169,6 +213,8 @@ async def get_article_summary(
         "chunk_count": len(chunks),
         "generated_at": datetime.utcnow().isoformat()
     }
+
+# --- CRUD Endpoints for Images ---
 
 @app.post("/images/", response_model=schemas.ImageBase)
 def create_image(image: schemas.ImageBase, db: Session = Depends(get_db)):
@@ -212,4 +258,3 @@ def create_actor(actor: schemas.ActorCreate, db: Session = Depends(get_db)):
 def read_actors(db: Session = Depends(get_db)):
     actors = db.query(models.Actor).all()
     return actors
-

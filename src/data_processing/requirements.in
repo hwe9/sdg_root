@@ -1,0 +1,9 @@
+# Verarbeitung/Preprocessing: Audio/Text, Chunking, Analytics (leichtgewichtig)
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+httpx
+numpy
+pandas
+nltk

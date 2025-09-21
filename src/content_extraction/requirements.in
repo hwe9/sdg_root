@@ -1,0 +1,12 @@
+# Inhaltsextraktion: HTML/PDF/DOCX-Extraktion
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+httpx
+beautifulsoup4
+lxml
+pdfminer.six
+pypdf
+python-docx
+python-magic

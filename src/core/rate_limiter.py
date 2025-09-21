@@ -138,6 +138,9 @@ def rate_limit(limit: int = 60, window: int = 60, algorithm: str = "sliding_wind
 
 # Global rate limiter instance
 _rate_limiter: Optional[RateLimiter] = None
+def init_rate_limiter(redis_url: str) -> None:
+    global _rate_limiter
+    _rate_limiter = RateLimiter(redis_url)
 
 def get_rate_limiter() -> RateLimiter:
     global _rate_limiter

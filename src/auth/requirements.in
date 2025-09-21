@@ -1,0 +1,11 @@
+# Auth-Service: JWT, Passwort-Hashing, DB, Redis
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+httpx
+python-jose[cryptography]
+passlib[bcrypt]
+psycopg2-binary
+SQLAlchemy
+redis
