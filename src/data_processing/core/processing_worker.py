@@ -10,7 +10,8 @@ class ProcessingWorker:
         self.raw_data_dir = raw_data_dir
         self.processed_data_dir = processed_data_dir
         self.database_url = database_url
-        self.file_handler = FileHandler(images_dir=os.path.join(processed_data_dir, "images"))
+        images_root = os.environ.get("IMAGES_DIR", os.path.join(processed_data_dir, "images"))
+        self.file_handler = FileHandler(images_dir=images_root)
         self.processing_logic = ProcessingLogic(whisper_model, sentence_model)
         os.makedirs(self.processed_data_dir, exist_ok=True)
 
@@ -86,8 +87,8 @@ class ProcessingWorker:
                     time.sleep(5)
 
 if __name__ == "__main__":
-    RAW_DATA_DIR = "/app/raw_data"
-    PROCESSED_DATA_DIR = "/app/processed_data"
+    RAW_DATA_DIR = os.environ.get("RAW_DATA_DIR", "/data/raw_data")
+    PROCESSED_DATA_DIR = os.environ.get("PROCESSED_DATA_DIR", "/data/processed_data")
     DATABASE_URL = os.environ.get("DATABASE_URL")
     from faster_whisper import WhisperModel
     from sentence_transformers import SentenceTransformer

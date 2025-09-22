@@ -8,7 +8,7 @@ from retrieval_worker import RetrievalWorker
 tmp_path = Path("/app/raw_data")
 
 def test_load_sources(tmp_path):
-    testfile = tmp_path / "quelle.txt"
+    testfile = tmp_path / "new_sources.txt"
     test_link = "https://wwwcdn.imo.org/localresources/en/MediaCentre/HotTopics/Documents/IMO%20SDG%20Brochure.pdf"
     testfile.write_text(test_link)
     worker = RetrievalWorker(str(testfile), str(tmp_path), str(tmp_path / "out.json"))

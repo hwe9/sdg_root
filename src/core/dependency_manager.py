@@ -110,7 +110,7 @@ class DependencyManager:
                 await asyncio.to_thread(lambda: socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP))
                 return True
             except Exception as e:
-                logger.warning(f"DNS not ready for {hostname}:{port} (attempt {i+1}): {e}")
+                logger.info(f"DNS not ready for {hostname}:{port} (attempt {i+1}): {e}")
                 await asyncio.sleep(base_delay * (i + 1))
         return False
     

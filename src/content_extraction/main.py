@@ -29,10 +29,10 @@ extractors = {}
 
 # Extractors
 try:
-    from extractors.gemini_extractor import GeminiExtractor
-    from extractors.web_extractor import WebExtractor
-    from extractors.newsletter_extractor import NewsletterExtractor
-    from extractors.rss_extractor import RSSExtractor
+    from .extractors.gemini_extractor import GeminiExtractor
+    from .extractors.web_extractor import WebExtractor
+    from .extractors.newsletter_extractor import NewsletterExtractor
+    from .extractors.rss_extractor import RSSExtractor
 except ImportError as e:
     logger.error(f"failed to import extractors: {e}")
 
@@ -128,7 +128,7 @@ async def lifespan(app: FastAPI):
     setup_sdg_dependencies()
 
     # Mark non-critical deps optional
-    for svc in ("auth", "api", "data_processing", "vectorization", "data_retrieval"):
+    for svc in ("auth", "api", "data_processing", "vectorization", "data_retrieval", "weaviate", "weaviate_transformer"):
         key = _norm(svc)
         if key in getattr(dependency_manager, "services", {}):
             dependency_manager.services[key].required = False

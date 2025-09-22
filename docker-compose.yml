@@ -61,11 +61,11 @@ services:
       - "8005"
     volumes:
       - ${SRC_ROOT}:/app:ro
-      - ${SRC_ROOT}/secrets:/app/secrets:ro
+      - ${DATA_ROOT}/secrets:/data/secrets
     environment:
       - PYTHONPATH=/app
       - REDIS_URL=${REDIS_URL}
-      - SECRET_STORE_DIR=/app/secrets
+      - SECRET_STORE_DIR=/data/secrets
       - SECRET_KEY=${SECRET_KEY}
       - SECRET_KEY_ENCRYPTED=${SECRET_KEY_ENCRYPTED:-}
       - ENCRYPTION_SALT=${ENCRYPTION_SALT}
@@ -192,56 +192,38 @@ services:
           memory: 2G
 
   db_bootstrap:
-  image: postgres:16-alpine
-  depends_on:
-    database_service:
-      condition: service_healthy
-  environment:
-    - PGHOST=database_service
-    - PGPORT=5432
-    - PGUSER=${POSTGRES_USER:-postgres}
-    - PGPASSWORD=${POSTGRES_PASSWORD}
-    - APP_DB_NAME=${POSTGRES_DB:-sdg_pipeline}
-    - APP_DB_USER=sdg_service
-    - APP_DB_PASSWORD=${APP_DB_PASSWORD}
-  volumes:
-    - ${SRC_ROOT}/src/api/bootstrap.sql:/bootstrap/bootstrap.sql:ro
-  command:
-    - sh
-    - -lc
-    - |
-      set -euo pipefail
+    image: postgres:16-alpine
+    depends_on:
+      database_service:
+        condition: service_healthy
+    environment:
+      - PGHOST=database_service
+      - PGPORT=5432
+      - PGUSER=${POSTGRES_USER:-postgres}
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - APP_DB_NAME=${POSTGRES_DB:-sdg_pipeline}
+      - APP_DB_USER=sdg_service
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD}
+    volumes:
+      - ${SRC_ROOT}/src/api:/bootstrap:ro
+    command:
+      - sh
+      - -lc
+      - |
+        set -euo pipefail
+        [ -f /bootstrap/db_bootstrap.sql ] || { echo "db_bootstrap: /bootstrap/db_bootstrap.sql fehlt oder ist kein File"; ls -l /bootstrap; exit 1; }
 
-      # 1) Rolle idempotent anlegen (psql-Variablen; keine DO-Blocks nötig)
-      psql -h "$PGHOST" -U "$PGUSER" -d postgres -v u="$APP_DB_USER" -v p="$APP_DB_PASSWORD" -v ON_ERROR_STOP=1 <<'SQL'
-      SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'u', :'p')
-      WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'u')
-      \gexec
-      SQL
-
-      # 2) Datenbank idempotent anlegen (außerhalb Transaktionen)
-      psql -h "$PGHOST" -U "$PGUSER" -d postgres -v d="$APP_DB_NAME" -v u="$APP_DB_USER" -v ON_ERROR_STOP=1 <<'SQL'
-      SELECT format('CREATE DATABASE %I OWNER %I', :'d', :'u')
-      WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'d')
-      \gexec
-      SQL
-
-      # 3) Rechte in der Ziel-DB setzen (idempotent)
-      psql -h "$PGHOST" -U "$PGUSER" -d "$APP_DB_NAME" -v u="$APP_DB_USER" -v ON_ERROR_STOP=1 -c \
-        'GRANT ALL ON SCHEMA public TO :"u";'
-      psql -h "$PGHOST" -U "$PGUSER" -d "$APP_DB_NAME" -v u="$APP_DB_USER" -v ON_ERROR_STOP=1 -c \
-        'ALTER SCHEMA public OWNER TO :"u";'
-
-      # 4) Projekt-SQL nur einspielen, wenn Datei existiert und nicht leer ist
-      if [ -s /bootstrap/bootstrap.sql ]; then
-        psql -h "$PGHOST" -U "$PGUSER" -d "$APP_DB_NAME" -v ON_ERROR_STOP=1 -f /bootstrap/bootstrap.sql
-      fi
-
-      echo "Bootstrap completed."
-  restart: "no"
-  networks:
-    - sdg_internal
-
+        psql -h "$PGHOST" -U "$PGUSER" -d postgres \
+          --set=ON_ERROR_STOP=1 \
+          --set=u="${APP_DB_USER}" \
+          --set=d="${APP_DB_NAME}" \
+          --set=p="${APP_DB_PASSWORD}" \
+          -f /bootstrap/db_bootstrap.sql
+        echo "Bootstrap completed."
+    restart: "no"
+    networks:
+      - sdg_internal
+  
   weaviate_transformer_service:
     image: ${WEAVIATE_IMAGE}              # z.B. semitechnologies/transformers-inference:sentence-transformers-paraphrase-multilingual-MiniLM-L12-v2
     container_name: weaviate_transformer_service
@@ -270,7 +252,7 @@ services:
       - sdg_internal
 
   weaviate_service:
-    image: semitechnologies/weaviate:1.32.2
+    image: semitechnologies/weaviate:1.24.1
     container_name: weaviate_service
     restart: unless-stopped
     ports:
@@ -293,8 +275,16 @@ services:
       weaviate_transformer_service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null"]
-      interval: 15s
+      test:
+        - CMD-SHELL
+        - |
+          (command -v curl >/dev/null 2>&1 && \
+             (curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null || \
+              curl -fsS http://localhost:8080/.well-known/ready  >/dev/null)) || \
+          (command -v wget >/dev/null 2>&1 && \
+             (wget -q -O - http://localhost:8080/v1/.well-known/ready >/dev/null || \
+              wget -q -O - http://localhost:8080/.well-known/ready  >/dev/null)) || exit 1
+      interval: 20s
       timeout: 10s
       retries: 20
       start_period: 120s
@@ -347,12 +337,16 @@ services:
       - "8002:8002"
     volumes:
       - ${SRC_ROOT}:/app:ro
-      - ${DATA_ROOT}/raw_data:/app/raw_data
-      - ${DATA_ROOT}/quelle.txt:/app/quelle.txt
+      - ${DATA_ROOT}/raw_data:/data/raw_data
+      - ${DATA_ROOT}/processed_data:/data/processed_data
     environment:
       - PYTHONPATH=/app
+      - DATA_DIR=/data/raw_data
+      - PROCESSED_FILE=/data/processed_data/processed_data.json
+      - SOURCES_FILE=/app/src/data_retrieval/new_sources.txt
       - SERVICE_HOST=data_retrieval_service
       - SERVICE_PORT=8002
+      - SOURCES_FILE=/app/src/data_retrieval/new_sources.txt
       - DATABASE_URL=${DATABASE_URL:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - SECRET_KEY=${SECRET_KEY}
@@ -387,12 +381,15 @@ services:
       - "8001:8001"
     volumes:
       - ${SRC_ROOT}:/app:ro
-      - ${DATA_ROOT}/raw_data:/app/raw_data
-      - ${DATA_ROOT}/processed_data:/app/processed_data
-      - ${DATA_ROOT}/images:/app/images
+      - ${DATA_ROOT}/raw_data:/data/raw_data
+      - ${DATA_ROOT}/processed_data:/data/processed_data
+      - ${DATA_ROOT}/images:/data/images
     environment:
       - PYTHONPATH=/app
       - DATABASE_URL=${DATABASE_URL:-}
+      - RAW_DATA_DIR=/data/raw_data
+      - PROCESSED_DATA_DIR=/data/processed_data
+      - IMAGES_DIR=/data/images
       - WEAVIATE_URL=${WEAVIATE_URL}
       - WEAVIATE_API_KEY=${WEAVIATE_API_KEY}
       - REDIS_URL=redis://redis:6379
@@ -438,11 +435,16 @@ services:
     expose:
       - "8004"
     volumes:
-      - ${SRC_ROOT}:/app/src:ro
+      - ${SRC_ROOT}:/app:ro
+      - ${DATA_ROOT}/config:/data/config
+      - ${DATA_ROOT}/secrets:/data/secrets
     environment:
       - PYTHONPATH=/app
+      - CONFIG_DIR=/data/config
+      - SECRET_STORE_DIR=/data/secrets
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@database_service:5432/sdg_pipeline}
       - WEAVIATE_URL=${WEAVIATE_URL}
+      - WEAVIATE_TRANSFORMER_URL=http://weaviate_transformer_service:8080
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - SECRET_KEY=${SECRET_KEY}

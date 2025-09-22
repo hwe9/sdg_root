@@ -23,8 +23,10 @@ RUN set -eux; \
     install -d -m 0770 -o authuser -g authgroup /app/secrets
 
 
-RUN install -m 0755 /app/src/auth/entrypoint.sh /usr/local/bin/entrypoint.sh
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+COPY src/auth/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod 0755 /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/bin/sh","/usr/local/bin/entrypoint.sh"]
 
 
 EXPOSE 8005

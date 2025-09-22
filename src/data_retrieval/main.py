@@ -72,7 +72,7 @@ async def setup_data_retrieval_dependencies():
         try:
             # Initialize source manager
             source_manager = SourceManager(
-                sources_file=os.getenv("SOURCES_FILE", "/app/quelle.txt"),
+                sources_file=os.getenv("SOURCES_FILE", "/app/new_sources.txt"),
                 data_dir=os.getenv("DATA_DIR", "/app/raw_data")
             )
             

@@ -142,7 +142,7 @@ class JWTRotationService:
     async def _backup_current_keys(self):
         """Backup current JWT keys"""
         try:
-            backup_dir = Path("/app/auth/key_backups")
+            backup_dir = Path("/data/auth/key_backups")
             backup_dir.mkdir(parents=True, exist_ok=True)
             
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -267,7 +267,7 @@ class JWTRotationService:
         async def cleanup_old_keys():
             await asyncio.sleep(cleanup_delay)
             try:
-                backup_dir = Path("/app/auth/key_backups")
+                backup_dir = Path("/data/auth/key_backups")
                 cutoff_date = datetime.utcnow() - timedelta(days=30 * self.backup_retention_months)
                 
                 for backup_file in backup_dir.glob("jwt_keys_backup_*.json"):
@@ -286,7 +286,7 @@ class JWTRotationService:
             logger.info("Attempting rotation rollback...")
             
             # Load most recent backup
-            backup_dir = Path("/app/auth/key_backups")
+            backup_dir = Path("/data/auth/key_backups")
             backups = sorted(backup_dir.glob("jwt_keys_backup_*.json"), reverse=True)
             
             if backups:

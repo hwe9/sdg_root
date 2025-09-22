@@ -27,10 +27,10 @@ from ..core.dependency_manager import dependency_manager, wait_for_dependencies,
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-RAW_DATA_DIR = "/app/raw_data"
-PROCESSED_DATA_DIR = "/app/processed_data"
+RAW_DATA_DIR = "/data/raw_data"
+PROCESSED_DATA_DIR = "/data/processed_data"
 DATABASE_URL = os.environ.get("DATABASE_URL")
-IMAGES_DIR = "/app/images"
+IMAGES_DIR = "/data/images"
 CLEANUP_INTERVAL_DAYS = 7 
 last_cleanup_timestamp = 0
 

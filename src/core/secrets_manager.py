@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class SecretsManager:
     def __init__(self):
         self._fernet = self._build_fernet()
-        self._store_dir = Path(os.environ.get("SECRET_STORE_DIR", "/app/secrets"))
+        self._store_dir = Path(os.environ.get("SECRET_STORE_DIR", "/data/secrets"))
         try:
             self._store_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
