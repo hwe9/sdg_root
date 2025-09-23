@@ -22,12 +22,10 @@ RUN set -eux; \
     if ! getent passwd 1000 >/dev/null; then adduser  --system --uid 1000 --gid 1000 --home /app --disabled-login authuser; fi; \
     install -d -m 0770 -o authuser -g authgroup /app/secrets
 
-
 COPY src/auth/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod 0755 /usr/local/bin/entrypoint.sh
-
-ENTRYPOINT ["/bin/sh","/usr/local/bin/entrypoint.sh"]
-
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+    && chmod 0755 /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 EXPOSE 8005
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \

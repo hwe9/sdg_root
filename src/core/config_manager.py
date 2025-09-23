@@ -1,4 +1,4 @@
-import os
+import os, errno, tempfile
 import json
 import yaml
 from typing import Dict, Any, Optional, List
@@ -35,8 +35,20 @@ class ConfigurationManager:
     """Central configuration management"""
     
     def __init__(self, config_dir: str = None):
-        self.config_dir = Path(config_dir or os.getenv("CONFIG_DIR", "/app/config"))
-        self.config_dir.mkdir(exist_ok=True)
+        requested = Path(config_dir or os.getenv("CONFIG_DIR", "/app/config"))
+        self._readonly = False
+        try:
+            requested.mkdir(parents=True, exist_ok=True)
+            self.config_dir = requested
+        except OSError as e:
+            if e.errno in (errno.EROFS, errno.EACCES):
+                fallback = Path(os.getenv("CONFIG_FALLBACK_DIR", "/tmp/sdg_config"))
+                fallback.mkdir(parents=True, exist_ok=True)
+                self.config_dir = fallback
+                self._readonly = True
+                logger.warning(f"Config dir {requested} not writable; using in-memory config with dir {self.config_dir}")
+            else:
+                raise
         self.services_config = {}
         self.global_config = {}
         self._load_configurations()
@@ -69,9 +81,8 @@ class ConfigurationManager:
             self._create_default_configurations()
     
     def _create_default_configurations(self):
-        """Create default configuration files with dependency information"""
+
         try:
-            # Global configuration
             global_config = {
                 "environment": os.getenv("ENVIRONMENT", "development"),
                 "debug": os.getenv("DEBUG", "false").lower() == "true",
@@ -128,16 +139,16 @@ class ConfigurationManager:
                 }
             }
             
-            # Save configurations
-            with open(self.config_dir / "global.yaml", 'w') as f:
-                yaml.dump(global_config, f, default_flow_style=False)
-            
-            services_dir = self.config_dir / "services"
-            services_dir.mkdir(exist_ok=True)
-            
-            for service_name, config in services.items():
-                with open(services_dir / f"{service_name}.yaml", 'w') as f:
-                    yaml.dump(config, f, default_flow_style=False)
+            if not self._readonly:
+                with open(self.config_dir / "global.yaml", 'w') as f:
+                   yaml.dump(global_config, f, default_flow_style=False)
+                services_dir = self.config_dir / "services"
+                services_dir.mkdir(exist_ok=True)
+                for service_name, config in services.items():
+                    with open(services_dir / f"{service_name}.yaml", 'w') as f:
+                        yaml.dump(config, f, default_flow_style=False)
+            else:
+                logger.info("Readonly config mode: using in-memory defaults; no files written.")
             
             self.global_config = global_config
             for service_name, config in services.items():

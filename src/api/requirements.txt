@@ -3,6 +3,8 @@ uvicorn[standard]==0.30.0
 pydantic>=2.8.0,<3.0.0
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.7
+pympler==1.0.1
+prometheus-client>=0.20.0
 alembic==1.13.1
 python-dotenv==1.0.0
 redis==5.0.1

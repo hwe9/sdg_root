@@ -152,9 +152,21 @@ async def lifespan(app: FastAPI):
      
         if dependency_manager.unregister_service("dataprocessing"):
             logger.info("✅ Data Processing removed from orchestrator (Compose controls lifecycle)")
+
+        if dependency_manager.unregister_service("weaviate"):
+            logger.info("✅ Weaviate removed from orchestrator (Compose controls lifecycle)")
+        
+        if dependency_manager.unregister_service("weaviate_transformer"):
+            logger.info("✅ Weaviate Transformer removed from orchestrator (Compose controls lifecycle)")
         
         if dependency_manager.unregister_service("vectorization"):
             logger.info("✅ Vectorization removed from orchestrator (Compose controls lifecycle)")
+        
+        if dependency_manager.unregister_service("data_retrieval"):
+            logger.info("✅ Data Retrieval removed from orchestrator (Compose controls lifecycle)")
+        
+        if dependency_manager.unregister_service("content_extraction"):
+            logger.info("✅ Content Extraction removed from orchestrator (Compose controls lifecycle)")
         
         dependency_manager.register_startup_task("auth", initialize_auth_service)
 

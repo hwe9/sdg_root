@@ -62,8 +62,10 @@ services:
     volumes:
       - ${SRC_ROOT}:/app:ro
       - ${DATA_ROOT}/secrets:/data/secrets
+      - ${DATA_ROOT}/config:/data/config
     environment:
       - PYTHONPATH=/app
+      - CONFIG_DIR=/data/config
       - REDIS_URL=${REDIS_URL}
       - SECRET_STORE_DIR=/data/secrets
       - SECRET_KEY=${SECRET_KEY}
@@ -129,6 +131,7 @@ services:
       - MAX_STARTUP_TIME=300
     networks:
       - sdg_internal
+      - sdg_external
     depends_on:
       database_service:
         condition: service_healthy
@@ -136,11 +139,15 @@ services:
         condition: service_completed_successfully
       auth_service:
         condition: service_healthy
+      weaviate_service:
+        condition: service_healthy
+      weaviate_transformer_service:
+        condition: service_healthy
       redis:
         condition: service_healthy
     command: ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/live"]
       interval: 15s
       timeout: 5s
       retries: 10

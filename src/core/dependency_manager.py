@@ -232,7 +232,23 @@ class DependencyManager:
                 pass
             
     def _register_core_services(self):
-        """Register core SDG pipeline services"""
+        _api_health_url = os.getenv("API_HEALTH_URL", "").strip()
+        if _api_health_url:
+            try:
+                _p = urlparse(_api_health_url)
+                api_base_url = (
+                    f"{_p.scheme}://{_p.netloc}"
+                    if _p.scheme and _p.netloc
+                    else os.getenv("API_SERVICE_URL", "http://api_service:8000")
+                )
+                api_health_ep = _p.path or "/ready"
+            except Exception:
+                api_base_url = os.getenv("API_SERVICE_URL", "http://api_service:8000")
+                api_health_ep = "/ready"
+        else:
+            api_base_url = os.getenv("API_SERVICE_URL", "http://api_service:8000")
+            api_health_ep = os.getenv("API_HEALTH_ENDPOINT", "/ready")
+
         core_services = {
             "database": ServiceDependency(
                 name="database",
@@ -269,7 +285,8 @@ class DependencyManager:
             ),
             "api": ServiceDependency(
                 name="api",
-                url=os.getenv("API_SERVICE_URL", "http://api_service:8000"),
+                url=api_base_url,
+                health_endpoint=api_health_ep,  # ← Readiness der API
                 required=True,
                 dependencies=["database", "auth"]
             ),

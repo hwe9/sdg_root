@@ -1,3 +1,4 @@
+#!/bin/sh
 set -euo pipefail
 
 # Zielverzeichnis aus ENV (standard-kompatibel zum SecretsManager)
@@ -7,6 +8,12 @@ export SECRET_STORE_DIR="$SECRET_DIR"
 # Ordner anlegen und Rechte setzen; falls RO, nur warnen (Service kann dann nicht persistieren)
 if ! install -d -m 0770 -o authuser -g authgroup "$SECRET_DIR"; then
   echo "WARN: cannot ensure secret dir $SECRET_DIR (read-only?)." >&2
+fi
+
+# Optional: Config-Verzeichnis für persistente Konfigurationen
+CONFIG_DIR="${CONFIG_DIR:-/tmp/sdg_config}"
+if ! install -d -m 0770 -o authuser -g authgroup "$CONFIG_DIR"; then
+  echo "WARN: cannot ensure config dir $CONFIG_DIR" >&2
 fi
 
 umask 007

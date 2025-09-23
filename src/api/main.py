@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+import asyncio, time, os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,19 +14,49 @@ from ..core.dependency_manager import (
     dependency_manager,
     setup_sdg_dependencies,
     get_dependency_status,
+    ServiceStatus,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def _norm(name: str) -> str:
+    """Canonical service key (wie im DependencyManager verwendet)."""
+    return name.replace("_", "").lower()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Start socket immediately; track readiness in background."""
     logger.info("🚀 Starting SDG API Service...")
+    # Register deps and mark non-critical as optional
+    setup_sdg_dependencies()
+    for svc in ("weaviate", "weaviate_transformer",
+                "vectorization", "content_extraction",
+                "data_retrieval", "data_processing"):
+        key = _norm(svc)
+        if key in getattr(dependency_manager, "services", {}):
+            dependency_manager.services[key].required = False
+            logger.info(f"Marked {key} as optional for api")
+
+    # Start dependency manager in background (non-blocking)
+    asyncio.create_task(dependency_manager.start_all_services())
+
+    # Background readiness waiter (logs only)
+    async def _await_db_ready():
+        db_key = _norm("database")
+        start_ts = time.time()
+        timeout = float(os.getenv("DB_STARTUP_MAX_WAIT_SEC", "60"))
+        attempt = 0
+        while time.time() - start_ts < timeout:
+            attempt += 1
+            status = dependency_manager.service_status.get(db_key)
+            if status == ServiceStatus.HEALTHY:
+                logger.info("✅ Database reported HEALTHY; API ready.")
+                return
+            await asyncio.sleep(min(2.0 * attempt, 5.0))
+        logger.error("❌ Database not ready within bounded wait; API stays unready.")
+    asyncio.create_task(_await_db_ready())
     try:
-        # Abhängigkeiten registrieren & orchestriert starten (ohne create_all; Migrationen via Alembic)
-        setup_sdg_dependencies()
-        await dependency_manager.start_all_services()
-        logger.info("✅ SDG API Service started successfully")
         yield
     finally:
         logger.info("🔄 Shutting down SDG API Service...")
@@ -57,22 +88,48 @@ def read_root():
         "status": "healthy"
     }
 
-# -------------------------
-# Robust Health Endpoints
-# -------------------------
+@app.get("/live")
+def live():
+    return {"status": "up", "service": "SDG API Service", "timestamp": datetime.utcnow().isoformat()}
+
+@app.head("/live")
+def live_head():
+    return JSONResponse(status_code=200, content=None)
+
+@app.get("/ready")
+async def ready_check():
+    try:
+        db_healthy = check_database_health()
+        deps = await get_dependency_status()
+        services = deps.get("services", {})
+        # required services für die API-Readiness (API selbst ausklammern)
+        required_names = [n for n, info in services.items() if info.get("required")]
+        if "api" in required_names:
+            required_names.remove("api")
+        required_ok = all(services.get(n, {}).get("status") == "healthy" for n in required_names)
+        ready = bool(db_healthy and required_ok)
+        payload = {
+            "status": "ready" if ready else "not_ready",
+            "service": "SDG API Service",
+            "version": "2.0.0",
+            "required_dependencies": {n: services.get(n, {}) for n in required_names},
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        return JSONResponse(status_code=200 if ready else 503, content=payload)
+    except Exception as e:
+        logging.exception("Readiness check error")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "service": "SDG API Service", "version": "2.0.0", "error": str(e),
+                     "timestamp": datetime.utcnow().isoformat()},
+        )
 
 @app.get("/health")
 async def health_check():
-    """
-    Liefert einen aggregierten Gesundheitszustand:
-    - Datenbank (synchroner Connectivity-Check)
-    - Abhängigkeiten (asynchroner Status aus dependency_manager)
-    Im Fehlerfall wird ein 503 zurückgegeben.
-    """
     try:
         db_healthy = check_database_health()
-        deps = await get_dependency_status()  # erwartet ein Dict inkl. 'overall_status'
-        overall_ok = db_healthy and deps.get("overall_status") == "healthy"
+        deps = await get_dependency_status()  # Gesamtzustand inkl. optionaler Dienste
+        overall_ok = bool(db_healthy and deps.get("overall_status") == "healthy")
 
         payload = {
             "status": "healthy" if overall_ok else "unhealthy",
@@ -97,7 +154,6 @@ async def health_check():
             },
         )
 
-# Optional: HEAD für schnelle Probes (z. B. NGINX/Container-Healthchecks)
 @app.head("/health")
 async def health_head():
     try:
