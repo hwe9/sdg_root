@@ -2,36 +2,54 @@
 import os
 import logging
 import sys
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 import asyncio
 from contextlib import asynccontextmanager
 
 # Add parent directory to path for core imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, status
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi import BackgroundTasks
+from fastapi import Depends
+from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 import numpy as np
 import uvicorn
 
 # Core imports with error handling
 try:
-    from core.dependency_manager import dependency_manager, wait_for_dependencies, get_dependency_status, setup_sdg_dependencies
+    from core.dependency_manager import dependency_manager
+    from core.dependency_manager import wait_for_dependencies
+    from core.dependency_manager import get_dependency_status
+    from core.dependency_manager import setup_sdg_dependencies
     DEPENDENCY_MANAGER_AVAILABLE = True
 except ImportError:
     DEPENDENCY_MANAGER_AVAILABLE = False
-    logger = logging.getLogger(__name__)
+logger = get_logger("vectorization")
     logger.warning("Dependency manager not available, falling back to direct initialization")
 
 from .embedding_models import EmbeddingManager
-from .vector_db_client import VectorDBClient, get_vector_client  
-from .similarity_search import SimilaritySearch, SDGRecommendationEngine
+from .vector_db_client import VectorDBClient
+from .vector_db_client import get_vector_client
+from .similarity_search import SimilaritySearch
+from .similarity_search import SDGRecommendationEngine
+from ..core.logging_config import get_logger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Import centralized logging
+try:
+    from core.logging_config import get_logger
+    logger = get_logger("vectorization")
+except ImportError:
+    # Fallback for backward compatibility
+logger = get_logger("vectorization")
 
 # Global service instances
 embedding_manager: Optional[EmbeddingManager] = None
@@ -271,7 +289,7 @@ async def _initialize_services_directly():
 app = FastAPI(
     title="SDG Vectorization Service",
     description="Microservice for SDG content embedding generation, vector storage, and semantic search",
-    version="1.0.0",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan

@@ -1,0 +1,25 @@
+# Development and testing requirements for SDG project
+# Install with: pip install -r requirements-dev.txt
+
+# Code formatting and linting
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+httpx>=0.25.0  # For testing HTTP endpoints
+
+# Documentation
+mkdocs>=1.5.0
+mkdocs-material>=9.0.0
+
+# Development tools
+pre-commit>=3.0.0
+
+# Type checking stubs
+types-PyYAML>=6.0.0
+types-redis>=4.0.0

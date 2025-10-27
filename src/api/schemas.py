@@ -1,6 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
+from pydantic import ConfigDict
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
+from typing import List
 
 class AiTopicBase(BaseModel):
     name: str

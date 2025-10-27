@@ -1,9 +1,15 @@
 import os
 import csv
 import logging
-import aiohttp, asyncio, inspect
+import aiohttp
+import asyncio
+import inspect
 from datetime import datetime
-from typing import Set, Dict, Any, Optional, List
+from typing import Set
+from typing import Dict
+from typing import Any
+from typing import Optional
+from typing import List
 from urllib.parse import urlparse
 
 from ..sources.web_source import WebSource
@@ -181,7 +187,8 @@ class SourceManager:
         Returns list of {url, reachable: bool, status: str}
         """
         results: List[Dict[str, Any]] = []
-        import aiohttp, asyncio
+        import aiohttp
+        import asyncio
         urls = await self.get_all_sources()
         timeout = aiohttp.ClientTimeout(total=15)
         connector = aiohttp.TCPConnector(limit=20, limit_per_host=5)

@@ -1,18 +1,29 @@
 # /sdg_root/src/core/dependency_manager.py
-import os, random
+import os
+import random
 import asyncio
 import logging
-import json, time
+import json
+import time
 from urllib.parse import urlparse
-from fastapi import FastAPI, Depends
-from typing import Dict, List, Any, Optional, Callable
-from dataclasses import dataclass, field
+from fastapi import FastAPI
+from fastapi import Depends
+from typing import Dict
+from typing import List
+from typing import Any
+from typing import Optional
+from typing import Callable
+from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
 from contextlib import asynccontextmanager
-import httpx, socket
+import httpx
+import socket
 from datetime import datetime
 from collections import defaultdict
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter
+from prometheus_client import Gauge
+from prometheus_client import Histogram
 from .error_handler import CircuitBreaker
 from .secrets_manager import secrets_manager
 
@@ -61,7 +72,7 @@ class DependencyManager:
         self._http_client = httpx.AsyncClient(timeout=30.0)
         self._state: Dict[str, Dict[str, int]] = {}  # {"service": {"fails": int, "oks": int}}
         self._breakers: Dict[str, CircuitBreaker] = {}
-        self._hc_duration = Histogram("health_check_duration_seconds", "Duration of dependency health checks", ["service"])
+        self._hc_duration = Histogram("dependency_health_check_duration_seconds", "Duration of dependency health checks", ["service"])
         self._hc_total = Counter("health_checks_total", "Total dependency health checks", ["service", "result"])
         self._svc_status = Gauge("service_status", "0=down,1=up", ["service"])
         self._register_core_services()

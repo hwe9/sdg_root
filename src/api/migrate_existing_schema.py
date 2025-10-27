@@ -2,7 +2,18 @@
 Migration script to enhance existing schema without breaking changes
 """
 import logging
-from sqlalchemy import create_engine, text, inspect, MetaData, Table, Column, String, Integer, Float, Boolean, DateTime, JSON
+from sqlalchemy import create_engine
+from sqlalchemy import text
+from sqlalchemy import inspect
+from sqlalchemy import MetaData
+from sqlalchemy import Table
+from sqlalchemy import Column
+from sqlalchemy import String
+from sqlalchemy import Integer
+from sqlalchemy import Float
+from sqlalchemy import Boolean
+from sqlalchemy import DateTime
+from sqlalchemy import JSON
 from sqlalchemy.sql import func
 import os
 

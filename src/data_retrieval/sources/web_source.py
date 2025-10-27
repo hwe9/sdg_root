@@ -3,7 +3,9 @@ Web Source Handler
 Handles HTTP/HTTPS downloads with proper error handling
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict
+from typing import Any
+from typing import Optional
 
 from ..core.download_strategies import HTTPDownloadStrategy
 

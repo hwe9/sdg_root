@@ -3,14 +3,20 @@ Perplexity.ai HTML Result Extractor (Non-API)
 Parses Perplexity search results and extracts content with source citations
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 import re
 import asyncio
-from bs4 import BeautifulSoup, Comment
-from urllib.parse import urljoin, urlparse
+from bs4 import BeautifulSoup
+from bs4 import Comment
+from urllib.parse import urljoin
+from urllib.parse import urlparse
 from datetime import datetime
 
-from .base_extractor import BaseExtractor, ExtractedContent
+from .base_extractor import BaseExtractor
+from .base_extractor import ExtractedContent
 
 logger = logging.getLogger(__name__)
 

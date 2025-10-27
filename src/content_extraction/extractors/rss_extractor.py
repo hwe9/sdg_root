@@ -2,12 +2,16 @@
 RSS Feed content extractor
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 import asyncio
 import feedparser
 from datetime import datetime
 import re
-from .base_extractor import BaseExtractor, ExtractedContent
+from .base_extractor import BaseExtractor
+from .base_extractor import ExtractedContent
 
 logger = logging.getLogger(__name__)
 

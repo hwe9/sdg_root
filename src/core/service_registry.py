@@ -1,7 +1,9 @@
 # Service registry for inter-service communication
 import httpx
 from .dependency_manager import dependency_manager
-from typing import Dict, Any, Optional
+from typing import Dict
+from typing import Any
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)

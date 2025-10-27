@@ -1,7 +1,9 @@
 import os
 import hashlib
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict
+from typing import Any
+from typing import Optional
 from datetime import datetime
 from urllib.parse import urlparse
 import aiofiles
@@ -140,7 +142,8 @@ class YouTubeDownloadStrategy(DownloadStrategy):
         """Extract YouTube metadata without downloading video"""
         try:
             from yt_dlp import YoutubeDL
-            from yt_dlp.utils import DownloadError, ExtractorError
+            from yt_dlp.utils import DownloadError
+            from yt_dlp.utils import ExtractorError
             
             ydl_opts = {
                 "skip_download": True,

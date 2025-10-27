@@ -2,7 +2,8 @@
 import bcrypt
 from datetime import datetime
 from typing import Optional
-from .models import SessionLocal, User
+from .models import SessionLocal
+from .models import User
 
 class UserRepository:
     def __init__(self):

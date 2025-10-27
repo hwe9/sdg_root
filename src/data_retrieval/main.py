@@ -1,22 +1,31 @@
 import logging
 import os
 from datetime import datetime
-from typing import List, Any, Optional
+from typing import List
+from typing import Any
+from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
+from fastapi import FastAPI
+from fastapi import BackgroundTasks
+from fastapi import HTTPException
+from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 import uvicorn
 
 from .core.retrieval_engine import RetrievalEngine
 from .core.source_manager import SourceManager
 from ..core.db_utils import check_database_health
-from ..core.dependency_manager import dependency_manager, wait_for_dependencies, get_dependency_status
-from ..core.error_handler import handle_errors, SDGPipelineError
+from ..core.dependency_manager import dependency_manager
+from ..core.dependency_manager import wait_for_dependencies
+from ..core.dependency_manager import get_dependency_status
+from ..core.error_handler import handle_errors
+from ..core.error_handler import SDGPipelineError
+from ..core.logging_config import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("data_retrieval")
 
 class RetrievalRequest(BaseModel):
     sources: Optional[list] = Field(None, description="Specific sources to retrieve from")
@@ -121,7 +130,8 @@ async def lifespan(app: FastAPI):
         # Setup dependencies
         await setup_data_retrieval_dependencies()
         
-        import asyncio, time
+        import asyncio
+        import time
         max_wait = float(os.getenv("DB_STARTUP_MAX_WAIT_SEC", "60"))
         start_ts = time.time()
         db_ok = False

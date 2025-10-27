@@ -16,7 +16,9 @@ import re
 import socket
 import ipaddress
 from urllib.parse import urlparse
-from typing import Set, List, Tuple
+from typing import Set
+from typing import List
+from typing import Tuple
 import logging
 
 logger = logging.getLogger(__name__)

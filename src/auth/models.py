@@ -1,7 +1,15 @@
 # /sdg_root/src/auth/models.py
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, func, UniqueConstraint
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy import Column
+from sqlalchemy import Integer
+from sqlalchemy import String
+from sqlalchemy import Boolean
+from sqlalchemy import DateTime
+from sqlalchemy import func
+from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@database_service:5432/sdg_pipeline")
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)

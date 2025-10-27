@@ -3,10 +3,14 @@ Newsletter content extractor
 Handles email newsletters and similar formatted content
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 import re
 from bs4 import BeautifulSoup
-from .base_extractor import BaseExtractor, ExtractedContent
+from .base_extractor import BaseExtractor
+from .base_extractor import ExtractedContent
 from .web_extractor import WebExtractor
 
 logger = logging.getLogger(__name__)
@@ -330,7 +334,8 @@ class NewsletterExtractor(WebExtractor):
             
             # Convert relative URLs to absolute
             if href.startswith('/'):
-                from urllib.parse import urljoin, urlparse
+                from urllib.parse import urljoin
+                from urllib.parse import urlparse
                 base_domain = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
                 href = urljoin(base_domain, href)
             elif not href.startswith(('http://', 'https://')):

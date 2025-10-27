@@ -1,6 +1,8 @@
 # src/data_processing/core/text_chunker.py
 import re
-from typing import List, Dict, Any
+from typing import List
+from typing import Dict
+from typing import Any
 from sentence_transformers import SentenceTransformer
 
 class SDGTextChunker:

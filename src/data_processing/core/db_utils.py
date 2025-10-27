@@ -5,69 +5,68 @@ import json
 import logging
 import time
 from contextlib import contextmanager
-from typing import Dict, Any, List, Optional
+from typing import Dict
+from typing import Any
+from typing import List
+from typing import Optional
+from typing import Callable
 import httpx
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError, DisconnectionError, IntegrityError
+from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import create_engine
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DisconnectionError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
-from datetime import datetime, timedelta
+from datetime import datetime
+from datetime import timedelta
 
-# Stabile Paket-Imports (kein sys.path-Hack)
+from src.core.metrics import get_histogram
+from src.core.metrics import get_counter
 from ...core.dependency_manager import get_dependency_manager
 from ...core.secrets_manager import secrets_manager  # falls künftig genutzt
+from ...core.db_utils import get_database_url
+from ...core.db_utils import get_database_engine
+from ...core.db_utils import check_database_health
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-def get_database_url() -> str:
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        logger.warning("DATABASE_URL not set, using default")
-        return "postgresql://postgres:postgres@database_service:5432/sdg_pipeline"
-    return db_url
+HEALTH_CHECK_DURATION = get_histogram(
+    "health_check_duration_seconds",
+    "Duration of health checks",
+    labelnames=("target",),
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
 
+HEALTH_CHECK_FAILS = get_counter(
+    "health_check_fail_total",
+    "Total number of failed health checks",
+    labelnames=("target",),
+)
+
+# Use centralized database configuration
 DATABASE_URL = get_database_url()
 WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080")
 WEAVIATE_API_KEY = os.environ.get("WEAVIATE_API_KEY")
 
 def get_database_engine():
-    engine_kwargs = {
-        "pool_pre_ping": True,
-        "pool_recycle": 300,
-        "pool_size": 10,
-        "max_overflow": 20,
-        "echo": False,
-        "poolclass": QueuePool,
-        "connect_args": {
-            "connect_timeout": 30,
-            "application_name": "SDG_Pipeline"
-        }
-    }
-    engine = create_engine(DATABASE_URL, **engine_kwargs)
-    for attempt in range(3):
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            logger.info("Database connection established successfully")
-            break
-        except (OperationalError, DisconnectionError) as e:
-            if attempt < 2:
-                logger.warning(f"Database connect attempt {attempt+1} failed: {e}")
-                time.sleep(2 ** attempt)
-            else:
-                logger.error("Failed to establish database connection after retries")
-                raise
-    return engine
+    """Use centralized database engine configuration"""
+    from ...core.db_utils import get_database_engine as get_centralized_engine
+    return get_centralized_engine()
 
-def check_database_health() -> bool:
-    try:
-        engine = get_database_engine()
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return True
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        return False
+def check_database_health(
+    get_engine: Optional[Callable[[], Engine]] = None,
+    *,
+    target_label: str = "database",
+) -> bool:
+    """Use centralized database health check"""
+    from ...core.db_utils import check_database_health as centralized_health_check
+    return centralized_health_check()
+           
 
 def get_database_session():
     """Kompatible Wrapper-API wie im Original: Session via Dependency Manager beziehen."""

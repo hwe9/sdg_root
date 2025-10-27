@@ -1,7 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Optional
+from datetime import datetime
+from datetime import timedelta
+from typing import Dict
+from typing import Optional
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 import aiohttp

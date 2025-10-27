@@ -2,13 +2,18 @@
 Base extractor class for all content extraction sources
 """
 import logging
-from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional
+from abc import ABC
+from abc import abstractmethod
+from typing import Dict
+from typing import List
+from typing import Any
+from typing import Optional
 from dataclasses import dataclass
 from datetime import datetime
 import asyncio
 import aiohttp
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
+from urllib.parse import urlparse
 import hashlib
 
 logging.basicConfig(level=logging.INFO)

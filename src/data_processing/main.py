@@ -6,30 +6,40 @@ import time
 import datetime
 import json
 import numpy as np
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+from sqlalchemy import text
 from sentence_transformers import SentenceTransformer
 from faster_whisper import WhisperModel
 import re
 import logging
 import asyncio
-from typing import List, Dict, Any
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from typing import List
+from typing import Dict
+from typing import Any
+from fastapi import FastAPI
+from fastapi import BackgroundTasks
+from fastapi import HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from core.db_utils import save_to_database
 from core.file_handler import FileHandler
 from core.processing_logic import ProcessingLogic
 from core.api_client import ApiClient
+from ..core.health_utils import HealthCheckResponse
 
 # Add after existing imports - DEPENDENCY MANAGEMENT INTEGRATION
-from ..core.dependency_manager import dependency_manager, wait_for_dependencies, setup_sdg_dependencies
+from ..core.dependency_manager import dependency_manager
+from ..core.dependency_manager import wait_for_dependencies
+from ..core.dependency_manager import setup_sdg_dependencies
+from ..core.logging_config import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("data_processing")
+
+from ..core.db_utils import get_database_url
 
 RAW_DATA_DIR = "/data/raw_data"
 PROCESSED_DATA_DIR = "/data/processed_data"
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = get_database_url()
 IMAGES_DIR = "/data/images"
 CLEANUP_INTERVAL_DAYS = 7 
 last_cleanup_timestamp = 0
@@ -236,32 +246,56 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SDG Data Processing Service",
     description="Microservice for processing SDG-related content with AI models",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
 # Enhanced health check with dependency status
 @app.get("/health")
 async def health_check():
-    """Enhanced health check with dependency status"""
-    from ..core.dependency_manager import get_dependency_status
-    
-    dependency_status = await get_dependency_status()
-    db_healthy = check_database_health()
-    
-    return {
-        "status": "healthy" if (processing_logic and db_healthy) else "unhealthy",
-        "service": "SDG Data Processing Service",
-        "version": "1.0.0",
-        "database": "connected" if db_healthy else "disconnected",
-        "models_loaded": {
-            "whisper": whisper_model is not None,
-            "sentence_transformer": sentence_model is not None,
-            "processing_logic": processing_logic is not None
-        },
-        "dependencies": dependency_status,
-        "timestamp": time.time()
-    }
+    """Standardized health check endpoint"""
+    try:
+        from ..core.dependency_manager import get_dependency_status
+        
+        dependency_status = await get_dependency_status()
+        db_healthy = check_database_health()
+        models_ok = all([processing_logic, whisper_model, sentence_model, file_handler, api_client])
+        
+        overall_status = "healthy" if (db_healthy and models_ok) else "unhealthy"
+        
+        if overall_status == "healthy":
+            return JSONResponse(
+                status_code=200,
+                content=HealthCheckResponse.healthy_response(
+                    "SDG Data Processing Service", "2.0.0",
+                    components={
+                        "database": "connected",
+                        "models": "loaded",
+                        "processing_logic": "ready",
+                        "file_handler": "ready",
+                        "api_client": "ready"
+                    },
+                    dependencies=dependency_status
+                )
+            )
+        else:
+            return JSONResponse(
+                status_code=503,
+                content=HealthCheckResponse.unhealthy_response(
+                    "SDG Data Processing Service", "2.0.0",
+                    components={
+                        "database": "connected" if db_healthy else "disconnected",
+                        "models": "loaded" if models_ok else "not_loaded"
+                    },
+                    dependencies=dependency_status
+                )
+            )
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return JSONResponse(
+            status_code=503,
+            content=HealthCheckResponse.error_response("SDG Data Processing Service", "2.0.0", str(e))
+        )
 
 @app.post("/process-content", response_model=ProcessingResponse)
 async def process_content_endpoint(request: ProcessContentRequest):

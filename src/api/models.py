@@ -1,13 +1,28 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, Table, JSON, Boolean, Index
-from sqlalchemy.orm import relationship, sessionmaker, declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy import Column
+from sqlalchemy import Integer
+from sqlalchemy import String
+from sqlalchemy import Text
+from sqlalchemy import Float
+from sqlalchemy import ForeignKey
+from sqlalchemy import DateTime
+from sqlalchemy import Table
+from sqlalchemy import JSON
+from sqlalchemy import Boolean
+from sqlalchemy import Index
+from sqlalchemy.orm import relationship
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 from datetime import datetime
+from ..core.db_utils import get_database_url
+from ..core.db_utils import get_database_engine
+from ..core.models import User
+from ..core.models import Base
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-Base = declarative_base()
+DATABASE_URL = get_database_url()
+engine = get_database_engine()
 
 articles_tags = Table(
     'articles_tags',
@@ -31,13 +46,6 @@ articles_sdg_targets = Table(
     Column('sdg_id', Integer, ForeignKey('sdgs.id'), primary_key=True),
     Column('confidence_score', Float, default=0.0)
 )
-
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
 
 class Sdg(Base):
     __tablename__ = "sdgs"

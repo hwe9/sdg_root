@@ -7,7 +7,10 @@ import os
 import json
 import hashlib
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict
+from typing import Any
+from typing import Optional
+from typing import List
 import feedparser
 import aiofiles
 

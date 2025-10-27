@@ -1,7 +1,8 @@
 import requests
 import json
 import re
-from typing import Dict, Any
+from typing import Dict
+from typing import Any
 
 class ApiClient:
     def __init__(self):

@@ -1,13 +1,19 @@
 
 import logging
-from typing import List, Dict, Any, Optional, Union
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
+from typing import Union
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer
+from transformers import AutoModel
 import torch
 import torch.nn.functional as F
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

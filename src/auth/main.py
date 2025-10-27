@@ -7,12 +7,21 @@ import bcrypt
 import logging
 import asyncio
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
+from typing import Dict
+from typing import Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Body, APIRouter
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import FastAPI
+from fastapi import Depends
+from fastapi import HTTPException
+from fastapi import status
+from fastapi import Body
+from fastapi import APIRouter
+from fastapi.security import HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 from sqlalchemy import text  # CRITICAL: Import text for SQLAlchemy 2.0+
 
 from .jwt_manager import jwt_manager
@@ -25,12 +34,15 @@ from ..core.dependency_manager import (
     setup_sdg_dependencies,
     get_dependency_status,
 )
-from .token_store import register_refresh_token, consume_refresh_token
+from .token_store import register_refresh_token
+from .token_store import consume_refresh_token
 from .repository import UserRepository
-from .models import init_db, SessionLocal, User
+from .models import init_db
+from .models import SessionLocal
+from .models import User
+from ..core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logger = get_logger("auth")
 
 repo = UserRepository()
 security = HTTPBearer()

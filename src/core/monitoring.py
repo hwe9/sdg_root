@@ -3,11 +3,17 @@ import time as time_module
 import aiohttp
 import psutil
 import asyncio
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-from collections import defaultdict, deque
+from typing import Dict
+from typing import Any
+from typing import List
+from typing import Optional
+from datetime import datetime
+from datetime import timedelta
+from collections import defaultdict
+from collections import deque
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
+from dataclasses import asdict
 
 @dataclass
 class PerformanceMetrics:

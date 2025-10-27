@@ -3,11 +3,15 @@ Gemini 2.5 content analysis extractor
 Processes content through Gemini for SDG analysis
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 import asyncio
 import json
 import re
-from .base_extractor import BaseExtractor, ExtractedContent
+from .base_extractor import BaseExtractor
+from .base_extractor import ExtractedContent
 
 logger = logging.getLogger(__name__)
 

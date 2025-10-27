@@ -1,5 +1,6 @@
 # src/core/db_init.py
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+from sqlalchemy import text
 from .config_manager import config_manager
 import logging
 

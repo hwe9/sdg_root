@@ -4,7 +4,9 @@ Validates downloaded content for security and quality
 """
 import os
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict
+from typing import Any
+from typing import Optional
 from dataclasses import dataclass
 import magic
 import hashlib

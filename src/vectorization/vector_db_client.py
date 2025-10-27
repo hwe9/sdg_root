@@ -1,6 +1,10 @@
 import logging
 import time
-from typing import List, Dict, Any, Optional, Union
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
+from typing import Union
 import weaviate
 import numpy as np
 from weaviate.embedded import EmbeddedOptions

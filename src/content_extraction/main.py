@@ -4,17 +4,27 @@ import os
 import logging
 import asyncio
 import time
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi import BackgroundTasks
+from fastapi import Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel
+from pydantic import Field
+from pydantic import HttpUrl
+from pydantic import field_validator
 import httpx
 
 # SDG dependency manager
 from ..core.dependency_manager import (
+from ..core.logging_config import get_logger
     dependency_manager,
     setup_sdg_dependencies,
     get_dependency_status,
@@ -22,8 +32,7 @@ from ..core.dependency_manager import (
 )
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("content_extraction")
 readiness = {"ready": False}
 extractors = {}
 
@@ -177,7 +186,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SDG Content Extraction Service",
     description="Microservice for extracting and analyzing content from multiple sources",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 # CORS

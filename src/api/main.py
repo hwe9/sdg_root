@@ -1,24 +1,32 @@
 from datetime import datetime
 import logging
-import asyncio, time, os
+import asyncio
+import time
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
+from fastapi import Depends
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List
+from typing import Optional
 
-from .database import get_db, check_database_health
-from . import models, schemas
+from .database import get_db
+from .database import check_database_health
+from . import models
+from . import schemas
 from ..core.dependency_manager import (
     dependency_manager,
     setup_sdg_dependencies,
     get_dependency_status,
     ServiceStatus,
 )
+from ..core.health_utils import HealthCheckResponse
+from ..core.logging_config import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("api")
 
 def _norm(name: str) -> str:
     """Canonical service key (wie im DependencyManager verwendet)."""
@@ -126,32 +134,35 @@ async def ready_check():
 
 @app.get("/health")
 async def health_check():
+    """Standardized health check endpoint"""
     try:
         db_healthy = check_database_health()
-        deps = await get_dependency_status()  # Gesamtzustand inkl. optionaler Dienste
+        deps = await get_dependency_status()
         overall_ok = bool(db_healthy and deps.get("overall_status") == "healthy")
-
-        payload = {
-            "status": "healthy" if overall_ok else "unhealthy",
-            "service": "SDG API Service",
-            "version": "2.0.0",
-            "database": "connected" if db_healthy else "disconnected",
-            "dependencies": deps,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-        status_code = 200 if overall_ok else 503
-        return JSONResponse(status_code=status_code, content=payload)
+        
+        if overall_ok:
+            return JSONResponse(
+                status_code=200,
+                content=HealthCheckResponse.healthy_response(
+                    "SDG API Service", "2.0.0",
+                    components={"database": "connected"},
+                    dependencies=deps
+                )
+            )
+        else:
+            return JSONResponse(
+                status_code=503,
+                content=HealthCheckResponse.unhealthy_response(
+                    "SDG API Service", "2.0.0",
+                    components={"database": "disconnected"},
+                    dependencies=deps
+                )
+            )
     except Exception as e:
         logger.exception("Health check error")
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "error",
-                "service": "SDG API Service",
-                "version": "2.0.0",
-                "error": str(e),
-                "timestamp": datetime.utcnow().isoformat(),
-            },
+            content=HealthCheckResponse.error_response("SDG API Service", "2.0.0", str(e))
         )
 
 @app.head("/health")

@@ -2,12 +2,18 @@
 General web scraping extractor for various websites
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
 import asyncio
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup
+from bs4 import Comment
 import re
-from urllib.parse import urljoin, urlparse
-from .base_extractor import BaseExtractor, ExtractedContent
+from urllib.parse import urljoin
+from urllib.parse import urlparse
+from .base_extractor import BaseExtractor
+from .base_extractor import ExtractedContent
 
 logger = logging.getLogger(__name__)
 

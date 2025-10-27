@@ -3,7 +3,9 @@ API Source Handler
 Handles API endpoints from UN, World Bank, etc.
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict
+from typing import Any
+from typing import Optional
 
 from ..core.download_strategies import HTTPDownloadStrategy
 

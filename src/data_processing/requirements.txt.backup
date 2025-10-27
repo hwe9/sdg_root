@@ -1,0 +1,11 @@
+faster-whisper
+sentence-transformers
+sqlalchemy
+psycopg2-binary
+pypdf2
+python-docx
+requests
+Pillow
+pytesseract
+deep_translator
+weaviate-client>=4.0.0

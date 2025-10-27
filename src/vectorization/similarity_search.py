@@ -1,5 +1,10 @@
 import logging
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Optional
+from typing import Tuple
+from typing import Union
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import KMeans

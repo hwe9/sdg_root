@@ -2,7 +2,10 @@
 Intelligent SDG-aware text chunking with semantic boundaries
 """
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List
+from typing import Dict
+from typing import Any
+from typing import Tuple
 from sentence_transformers import SentenceTransformer
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity

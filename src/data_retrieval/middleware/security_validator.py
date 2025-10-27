@@ -16,7 +16,9 @@ import socket
 import ipaddress
 import re
 from urllib.parse import urlparse
-from typing import Dict, Any, Optional
+from typing import Dict
+from typing import Any
+from typing import Optional
 from dataclasses import dataclass
 from ...core.url_validator import URLValidator  # path aligned with src layout
 
