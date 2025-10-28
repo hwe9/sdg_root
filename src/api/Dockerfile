@@ -11,11 +11,9 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir bcrypt>=4.0.0 PyJWT[crypto]>=2.8.0
 
 
-COPY constraints/constraints.txt /tmp/constraints.txt
 COPY src/api/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
- && (pip install --no-cache-dir --require-hashes -c /tmp/constraints.txt -r /tmp/requirements.txt \
-     || pip install --no-cache-dir -r /tmp/requirements.txt)     
+ && pip install --no-cache-dir -r /tmp/requirements.txt     
 
 COPY scripts/create_app_user.sh /usr/local/bin/create_app_user.sh
 RUN chmod +x /usr/local/bin/create_app_user.sh \

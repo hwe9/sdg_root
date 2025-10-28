@@ -15,3 +15,4 @@ openai==1.40.0  # OpenAI API
 google-generativeai  # Google AI
 beautifulsoup4  # HTML parsing
 feedparser  # RSS parsing
+cryptography==41.0.7  # Cryptographic utilities

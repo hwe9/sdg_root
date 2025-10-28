@@ -9,11 +9,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY constraints/constraints.txt /tmp/constraints.txt
 COPY src/auth/requirements.txt      /tmp/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
- && (pip install --no-cache-dir --require-hashes -c /tmp/constraints.txt -r /tmp/requirements.txt \
-     || pip install --no-cache-dir -r /tmp/requirements.txt)
+ && pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY . /app
 

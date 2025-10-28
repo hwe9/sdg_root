@@ -24,12 +24,12 @@ import httpx
 
 # SDG dependency manager
 from ..core.dependency_manager import (
-from ..core.logging_config import get_logger
     dependency_manager,
     setup_sdg_dependencies,
     get_dependency_status,
     ServiceStatus,
 )
+from ..core.logging_config import get_logger
 
 # Configure logging
 logger = get_logger("content_extraction")

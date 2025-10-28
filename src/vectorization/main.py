@@ -33,7 +33,16 @@ try:
     DEPENDENCY_MANAGER_AVAILABLE = True
 except ImportError:
     DEPENDENCY_MANAGER_AVAILABLE = False
-logger = get_logger("vectorization")
+
+# Configure logging
+try:
+    from core.logging_config import get_logger
+    logger = get_logger("vectorization")
+except ImportError:
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO)
+
+if not DEPENDENCY_MANAGER_AVAILABLE:
     logger.warning("Dependency manager not available, falling back to direct initialization")
 
 from .embedding_models import EmbeddingManager
@@ -48,8 +57,10 @@ try:
     from core.logging_config import get_logger
     logger = get_logger("vectorization")
 except ImportError:
-    # Fallback for backward compatibility
-logger = get_logger("vectorization")
+    logging.basicConfig(level=logging.INFO)
+
+if not DEPENDENCY_MANAGER_AVAILABLE:
+    logger.warning("Dependency manager not available, falling back to direct initialization")
 
 # Global service instances
 embedding_manager: Optional[EmbeddingManager] = None
@@ -135,78 +146,53 @@ async def lifespan(app: FastAPI):
 
 async def _setup_vectorization_dependencies():
     """Setup vectorization-specific dependencies"""
-    
-    async def initialize_embedding_models():
-        """Initialize embedding models for vectorization service"""
+
+    async def initialize_vectorization_components():
+        """Initialize all vectorization components under the 'vectorization' service."""
+        # Embeddings
         global embedding_manager
         logger.info("🤖 Initializing embedding models...")
-        
-        try:
-            embedding_config = {
-                "sentence_transformer_model": "paraphrase-multilingual-MiniLM-L12-v2",
-                "openai_api_key": os.environ.get("OPENAI_API_KEY"),
-                "custom_model_path": os.environ.get("CUSTOM_MODEL_PATH", "bert-base-multilingual-cased")
-            }
-            
-            embedding_manager = EmbeddingManager(embedding_config)
-            logger.info("✅ Embedding models initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize embedding models: {e}")
-            raise
+        embedding_config = {
+            "sentence_transformer_model": "paraphrase-multilingual-MiniLM-L12-v2",
+            "openai_api_key": os.environ.get("OPENAI_API_KEY"),
+            "custom_model_path": os.environ.get("CUSTOM_MODEL_PATH", "bert-base-multilingual-cased"),
+        }
+        embedding_manager = EmbeddingManager(embedding_config)
+        logger.info("✅ Embedding models initialized successfully")
 
-    async def initialize_vector_client():
-        """Initialize vector database client"""
+        # Vector DB client
         global vector_client
         logger.info("🗄️ Initializing vector database client...")
-        
-        try:
-            weaviate_config = {
-                "url": os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080"),
-                "embedded": False,
-                "max_connections": int(os.environ.get("WEAVIATE_MAX_CONNECTIONS", "10")),
-                "retry_attempts": int(os.environ.get("WEAVIATE_RETRY_ATTEMPTS", "3")),
-                "retry_delay": float(os.environ.get("WEAVIATE_RETRY_DELAY", "1.0")),
-                "api_key": os.environ.get("WEAVIATE_API_KEY"), 
-            }
-            
-            # Validate Weaviate URL
-            if not weaviate_config["url"].startswith(('http://', 'https://')):
-                logger.error(f"Invalid WEAVIATE_URL format: {weaviate_config['url']}")
-                weaviate_config["url"] = "http://weaviate_service:8080"
-                logger.warning(f"Using fallback URL: {weaviate_config['url']}")
-            
-            vector_client = VectorDBClient(weaviate_config)
-            logger.info("✅ Vector database client initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize vector database client: {e}")
-            raise
+        weaviate_config = {
+            "url": os.environ.get("WEAVIATE_URL", "http://weaviate_service:8080"),
+            "embedded": False,
+            "max_connections": int(os.environ.get("WEAVIATE_MAX_CONNECTIONS", "10")),
+            "retry_attempts": int(os.environ.get("WEAVIATE_RETRY_ATTEMPTS", "3")),
+            "retry_delay": float(os.environ.get("WEAVIATE_RETRY_DELAY", "1.0")),
+            "api_key": os.environ.get("WEAVIATE_API_KEY"),
+        }
+        if not weaviate_config["url"].startswith(("http://", "https://")):
+            logger.error(f"Invalid WEAVIATE_URL format: {weaviate_config['url']}")
+            weaviate_config["url"] = "http://weaviate_service:8080"
+            logger.warning(f"Using fallback URL: {weaviate_config['url']}")
+        vector_client = VectorDBClient(weaviate_config)
+        logger.info("✅ Vector database client initialized successfully")
 
-    # Register startup tasks with dependency manager
-    dependency_manager.register_startup_task("vectorization_embeddings", initialize_embedding_models)
-    dependency_manager.register_startup_task("vectorization_vector_db", initialize_vector_client)
-    
-    # Register cleanup tasks
-    async def cleanup_embedding_models():
-        """Cleanup embedding models"""
-        global embedding_manager
+    async def cleanup_vectorization_components():
+        """Cleanup all vectorization components registered under 'vectorization'."""
+        global embedding_manager, vector_client
         embedding_manager = None
-        logger.info("✅ Embedding models cleaned up")
-
-    async def cleanup_vector_client():
-        """Cleanup vector database client"""
-        global vector_client
-        if vector_client:
-            try:
+        try:
+            if vector_client:
                 vector_client.close()
-            except Exception as e:
-                logger.warning(f"Error closing vector client: {e}")
+        except Exception as e:
+            logger.warning(f"Error closing vector client: {e}")
         vector_client = None
-        logger.info("✅ Vector database client cleaned up")
-    
-    dependency_manager.register_cleanup_task("vectorization_embeddings", cleanup_embedding_models)
-    dependency_manager.register_cleanup_task("vectorization_vector_db", cleanup_vector_client)
+        logger.info("✅ Vectorization components cleaned up")
+
+    # Register a single startup/cleanup task bound to the registered 'vectorization' service
+    dependency_manager.register_startup_task("vectorization", initialize_vectorization_components)
+    dependency_manager.register_cleanup_task("vectorization", cleanup_vectorization_components)
 
 async def _initialize_vectorization_services():
     """Initialize vectorization-specific search services"""

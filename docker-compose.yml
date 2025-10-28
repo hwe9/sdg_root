@@ -562,7 +562,7 @@ services:
       context: ${SRC_ROOT}
       dockerfile: src/migration/Dockerfile
     container_name: migration_service
-    command: python migration_plan.py
+    command: python src/migration/migration_plan.py
     depends_on:
       database_service:
         condition: service_healthy

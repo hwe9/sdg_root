@@ -11,3 +11,9 @@ sqlalchemy==2.0.43  # ORM
 psycopg2-binary==2.9.10  # PostgreSQL adapter
 prometheus-client==0.20.0  # Prometheus metrics
 python-dotenv==1.0.0  # Environment variables
+aiohttp==3.9.0  # Async HTTP client
+aiofiles==23.2.1  # Async file IO
+feedparser==6.0.11  # RSS/Atom feeds
+python-magic==0.4.27  # libmagic bindings for MIME detection
+cryptography==41.0.7  # needed by secrets_manager
+feedparser==6.0.11
