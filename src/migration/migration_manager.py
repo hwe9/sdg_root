@@ -123,6 +123,11 @@ class MigrationManager:
                 "name": "001_consolidate_users",
                 "file": "consolidate_users.sql",
                 "rollback_file": "rollback_consolidate_users.sql"
+            },
+            {
+                "name": "002_add_content_hash_to_articles",
+                "file": "002_add_content_hash_to_articles.sql",
+                "rollback_file": "rollback_add_content_hash_to_articles.sql"
             }
         ]
         

@@ -35,11 +35,119 @@ class BaseEmbeddingModel(ABC):
 class SentenceTransformerModel(BaseEmbeddingModel):
     """Multilingual Sentence Transformer for SDG content"""
     
-    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"):
+    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2", 
+                 cache_dir: Optional[str] = None,
+                 local_files_only: bool = False):
+        import os
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
-        self.dimension = self.model.get_sentence_embedding_dimension()
-        logger.info(f"Loaded SentenceTransformer model: {model_name}")
+        self.cache_dir = cache_dir or os.environ.get("HF_HOME") or os.environ.get("TRANSFORMERS_CACHE") or "/cache/huggingface"
+        self.local_files_only = local_files_only or os.environ.get("HF_LOCAL_FILES_ONLY", "0") == "1"
+        
+        # Set cache directory for HuggingFace if provided
+        if self.cache_dir:
+            os.environ["HF_HOME"] = self.cache_dir
+            os.environ["TRANSFORMERS_CACHE"] = self.cache_dir
+            logger.info(f"Using HuggingFace cache directory: {self.cache_dir}")
+        
+        # Determine local model path if available (for fully offline mode)
+        resolved_model_path = self._resolve_local_model_path(self.model_name)
+        model_reference = resolved_model_path or self.model_name
+        if resolved_model_path:
+            logger.info(f"Found local model snapshot for {self.model_name}: {resolved_model_path}")
+        
+        # Support offline mode if local_files_only is enabled
+        try:
+            if self.local_files_only:
+                logger.info(f"Loading model in offline mode (local files only): {model_reference}")
+                self.model = SentenceTransformer(
+                    model_reference,
+                    cache_folder=self.cache_dir,
+                    local_files_only=True
+                )
+            else:
+                self.model = SentenceTransformer(
+                    model_reference,
+                    cache_folder=self.cache_dir
+                )
+            self.dimension = self.model.get_sentence_embedding_dimension()
+            logger.info(f"✅ Loaded SentenceTransformer model: {self.model_name} (dimension: {self.dimension})")
+        except Exception as e:
+            # If online load fails and cache_dir is set, try offline snapshot
+            if not resolved_model_path:
+                logger.warning(f"⚠️ Primary load failed, attempting to locate local snapshot: {e}")
+                snapshot_path = self._resolve_local_model_path(self.model_name)
+            else:
+                snapshot_path = resolved_model_path
+            if snapshot_path and not self.local_files_only:
+                try:
+                    logger.info(f"Retrying with local snapshot path: {snapshot_path}")
+                    self.model = SentenceTransformer(
+                        snapshot_path,
+                        cache_folder=self.cache_dir,
+                        local_files_only=True
+                    )
+                    self.dimension = self.model.get_sentence_embedding_dimension()
+                    logger.info(f"✅ Loaded model from local snapshot: {snapshot_path}")
+                    return
+                except Exception as offline_error:
+                    logger.error(f"❌ Failed to load model even from local snapshot: {offline_error}")
+                    raise
+            logger.error(f"❌ Failed to load model: {e}")
+            raise
+
+    def _resolve_local_model_path(self, model_name: str) -> Optional[str]:
+        """Try to resolve a local snapshot directory for the given model."""
+        import os
+        import glob
+        if not self.cache_dir:
+            logger.debug(f"No cache_dir set for model resolution")
+            return None
+        sanitized = model_name.replace("/", "--")
+        hub_root = os.path.join(self.cache_dir, "hub")
+        logger.debug(f"Resolving model path for '{model_name}' (sanitized: '{sanitized}') in {hub_root}")
+        
+        if not os.path.isdir(hub_root):
+            logger.warning(f"Hub root directory does not exist: {hub_root}")
+            return None
+            
+        candidates: list[str] = []
+        # Exact match
+        exact_pattern = os.path.join(hub_root, f"models--{sanitized}")
+        exact_matches = glob.glob(exact_pattern)
+        candidates.extend(exact_matches)
+        logger.debug(f"Exact pattern matches: {exact_matches}")
+        
+        # Models downloaded under fully qualified names (e.g. sentence-transformers/...)
+        if not candidates:
+            pattern = os.path.join(hub_root, f"models--*{sanitized}*")
+            pattern_matches = glob.glob(pattern)
+            candidates.extend(pattern_matches)
+            logger.debug(f"Pattern '{pattern}' matches: {pattern_matches}")
+        
+        logger.debug(f"Total candidates found: {len(candidates)}")
+        for hub_base in candidates:
+            snapshots_dir = os.path.join(hub_base, "snapshots")
+            # Preferred: use ref from refs/main
+            ref_file = os.path.join(hub_base, "refs", "main")
+            if os.path.exists(ref_file):
+                try:
+                    with open(ref_file, "r", encoding="utf-8") as f:
+                        ref = f.read().strip()
+                    candidate = os.path.join(snapshots_dir, ref)
+                    if os.path.isdir(candidate):
+                        return candidate
+                except Exception as e:
+                    logger.debug(f"Unable to read refs for {model_name} at {hub_base}: {e}")
+            if os.path.isdir(snapshots_dir):
+                snapshot_candidates = sorted(glob.glob(os.path.join(snapshots_dir, "*")))
+                for candidate in snapshot_candidates:
+                    if os.path.isdir(candidate):
+                        return candidate
+        # Last resort: check direct folder (used when copying manually)
+        direct_path = os.path.join(self.cache_dir, model_name)
+        if os.path.isdir(direct_path):
+            return direct_path
+        return None
     
     def encode(self, texts: Union[str, List[str]], 
                normalize_embeddings: bool = True,
@@ -175,9 +283,16 @@ class EmbeddingManager:
     def _initialize_models(self):
         """Initialize available embedding models"""
         try:
+            import os
             # Sentence Transformer (multilingual)
+            model_name = self.config.get("sentence_transformer_model", "paraphrase-multilingual-MiniLM-L12-v2")
+            cache_dir = self.config.get("cache_dir") or os.environ.get("HF_CACHE_DIR")
+            local_files_only = self.config.get("local_files_only", False) or os.environ.get("HF_LOCAL_FILES_ONLY", "0") == "1"
+            
             self.models["sentence_transformer"] = SentenceTransformerModel(
-                self.config.get("sentence_transformer_model", "paraphrase-multilingual-MiniLM-L12-v2")
+                model_name=model_name,
+                cache_dir=cache_dir,
+                local_files_only=local_files_only
             )
             
             # OpenAI (if API key provided)

@@ -120,6 +120,9 @@ class RetrievalEngine:
                 new_urls = source_urls - processed_urls
                 self.current_stats.skipped_count = len(source_urls) - len(new_urls)
                 source_urls = new_urls
+            
+            # Note: Content hash deduplication happens during processing
+            # (after download, before saving) to avoid re-downloading URLs
 
             # Optionale Filter nur protokollieren (keine URL-Metadaten verfügbar)
             if filter_region:
@@ -143,8 +146,12 @@ class RetrievalEngine:
                     logger.error(f"❌ Task failed: {result}")
                     self.current_stats.failed_count += 1
                 elif result:
-                    processed_data.append(result)
-                    self.current_stats.success_count += 1
+                    if isinstance(result, list):
+                        processed_data.extend(result)
+                        self.current_stats.success_count += len(result)
+                    else:
+                        processed_data.append(result)
+                        self.current_stats.success_count += 1
                 else:
                     self.current_stats.failed_count += 1
 
@@ -175,7 +182,7 @@ class RetrievalEngine:
                 security_result = await self.security_validator.validate_url(url)
                 if not security_result.is_valid:
                     logger.warning(f"🚨 Security validation failed for {url}: {security_result.reason}")
-                    await self.source_manager.mark_url_processed(url, "security_blocked")
+                    await self.source_manager.mark_url_processed(url, "security_blocked", filename="")
                     return None
                 
                 # Rate limiting
@@ -184,40 +191,105 @@ class RetrievalEngine:
                 # Download content using appropriate strategy
                 download_result = await self.source_manager.download_content(url)
                 if not download_result:
-                    await self.source_manager.mark_url_processed(url, "download_failed")
+                    await self.source_manager.mark_url_processed(url, "download_failed", filename="")
                     return None
                 
-                # Content validation
-                validation_result = await self.content_validator.validate_content(download_result)
-                if not validation_result.is_valid:
-                    logger.warning(f"⚠️ Content validation failed for {url}: {validation_result.reason}")
-                    await self.source_manager.mark_url_processed(url, "content_invalid")
+                is_playlist = bool(download_result.get("playlist"))
+                entry_results = []
+                if is_playlist:
+                    entry_results = download_result.get("entries", [])
+                else:
+                    entry_results = [download_result]
+                
+                if not entry_results:
+                    status = "playlist_empty" if is_playlist else "download_failed"
+                    await self.source_manager.mark_url_processed(url, status, filename="")
                     return None
                 
-                # Mark as successfully processed
-                await self.source_manager.mark_url_processed(url, "success")
+                processed_hashes = await self.source_manager.get_processed_content_hashes()
+                successful_metadata: List[Dict[str, Any]] = []
+                playlist_title = download_result.get("playlist_title") if is_playlist else None
+                playlist_url = download_result.get("playlist_url") if is_playlist else None
                 
-                # Prepare metadata
-                metadata = {
-                    "url": url,
-                    "title": download_result.get("title", "Unknown"),
-                    "file_path": download_result.get("file_path"),
-                    "content_type": download_result.get("content_type"),
-                    "file_size": download_result.get("file_size"),
-                    "source_url": url,
-                    "processed_at": datetime.utcnow().isoformat(),
-                    "validation_score": validation_result.quality_score,
-                    "security_validated": True
-                }
+                for entry in entry_results:
+                    if not entry:
+                        await self.source_manager.mark_url_processed(url, "download_failed", filename="")
+                        continue
+                    entry_url = entry.get("source_url", url)
+                    if entry.get("filtered"):
+                        filter_reason = entry.get("filter_reason", "filtered")
+                        status_map = {
+                            "youtube_short": "youtube_short_skipped",
+                            "sponsored_content": "sponsored_content_skipped",
+                            "no_transcript": "no_transcript_skipped",
+                            "playlist_extract_error": "playlist_entry_error",
+                            "playlist_empty": "playlist_empty"
+                        }
+                        status = status_map.get(filter_reason, "filtered")
+                        logger.info(f"⏭️ Content filtered: {entry_url} - {filter_reason}")
+                        await self.source_manager.mark_url_processed(entry_url, status, filename="")
+                        continue
+                    
+                    validation_result = await self.content_validator.validate_content(entry)
+                    if not validation_result.is_valid:
+                        logger.warning(f"⚠️ Content validation failed for {entry_url}: {validation_result.reason}")
+                        await self.source_manager.mark_url_processed(entry_url, "content_invalid", 
+                                                                     filename=entry.get("file_path", ""))
+                        continue
+                    
+                    content_hash = validation_result.checksum
+                    if content_hash:
+                        if content_hash in processed_hashes:
+                            logger.info(f"🔄 Content hash {content_hash[:16]}... already processed (duplicate content from different URL)")
+                            await self.source_manager.mark_url_processed(entry_url, "duplicate_content", 
+                                                                         filename=entry.get("file_path", ""),
+                                                                         content_hash=content_hash)
+                            try:
+                                file_path = entry.get("file_path")
+                                if file_path and os.path.exists(file_path):
+                                    os.remove(file_path)
+                                    logger.debug(f"🗑️ Deleted duplicate file: {file_path}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to delete duplicate file: {e}")
+                            continue
+                        processed_hashes.add(content_hash)
+                    
+                    await self.source_manager.mark_url_processed(entry_url, "success", 
+                                                                 filename=entry.get("file_path", ""),
+                                                                 content_hash=content_hash)
+                    
+                    metadata = {
+                        "url": entry_url,
+                        "title": entry.get("title", "Unknown"),
+                        "file_path": entry.get("file_path"),
+                        "content_type": entry.get("content_type"),
+                        "file_size": entry.get("file_size"),
+                        "source_url": entry_url,
+                        "processed_at": datetime.utcnow().isoformat(),
+                        "validation_score": validation_result.quality_score,
+                        "security_validated": True,
+                        "content_hash": validation_result.checksum
+                    }
+                    if playlist_title or entry.get("playlist_title"):
+                        metadata["playlist_title"] = entry.get("playlist_title") or playlist_title
+                    if playlist_url or entry.get("playlist_url"):
+                        metadata["playlist_url"] = entry.get("playlist_url") or playlist_url
+                    
+                    await self._save_metadata_file(entry_url, metadata)
+                    successful_metadata.append(metadata)
                 
-                # Save individual metadata file
-                await self._save_metadata_file(url, metadata)
+                if is_playlist:
+                    if successful_metadata:
+                        await self.source_manager.mark_url_processed(url, "success", filename="")
+                        return successful_metadata
+                    await self.source_manager.mark_url_processed(url, "playlist_empty", filename="")
+                    return None
                 
-                return metadata
+                return successful_metadata[0] if successful_metadata else None
                 
             except Exception as e:
                 logger.error(f"❌ Error processing {url}: {e}")
-                await self.source_manager.mark_url_processed(url, "error")
+                await self.source_manager.mark_url_processed(url, "error", filename="")
                 return None
     
     async def _save_processed_data(self, processed_data: List[Dict[str, Any]]):

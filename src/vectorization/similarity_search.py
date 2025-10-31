@@ -31,8 +31,8 @@ class SimilaritySearch:
         self.sdg_interlinkages = self._load_sdg_interlinkages()
         
         # Search configuration
-        self.default_similarity_threshold = config.get("similarity_threshold", 0.7)
-        self.max_results = config.get("max_results", 100)
+        self.default_similarity_threshold = self.config.get("similarity_threshold", 0.7)
+        self.max_results = self.config.get("max_results", 100)
         
     def _load_sdg_interlinkages(self) -> Dict[int, List[int]]:
         # Simplified interlinkage mapping - replace with your full data
@@ -538,7 +538,7 @@ class SDGRecommendationEngine:
             
             # Get content for user's primary interests
             for sdg_goal in user_interests:
-                results = self.vector_client.search_by_sdg_goals(
+                results = self.similarity_search.vector_client.search_by_sdg_goals(
                     sdg_goals=[sdg_goal],
                     limit=limit // len(user_interests) + 2
                 )

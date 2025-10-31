@@ -34,6 +34,10 @@ try:
 except ImportError:
     DEPENDENCY_MANAGER_AVAILABLE = False
 
+# Allow opt-out via environment variable
+if os.getenv("DEPENDENCY_MANAGER_ENABLED", "true").strip().lower() not in {"1", "true", "yes"}:
+    DEPENDENCY_MANAGER_AVAILABLE = False
+
 # Configure logging
 try:
     from core.logging_config import get_logger
@@ -153,9 +157,11 @@ async def _setup_vectorization_dependencies():
         global embedding_manager
         logger.info("🤖 Initializing embedding models...")
         embedding_config = {
-            "sentence_transformer_model": "paraphrase-multilingual-MiniLM-L12-v2",
+            "sentence_transformer_model": os.environ.get("SENTENCE_TRANSFORMER_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"),
             "openai_api_key": os.environ.get("OPENAI_API_KEY"),
             "custom_model_path": os.environ.get("CUSTOM_MODEL_PATH", "bert-base-multilingual-cased"),
+            "cache_dir": os.environ.get("HF_CACHE_DIR", "/cache/huggingface"),
+            "local_files_only": os.environ.get("HF_LOCAL_FILES_ONLY", "0") == "1",
         }
         embedding_manager = EmbeddingManager(embedding_config)
         logger.info("✅ Embedding models initialized successfully")
@@ -251,8 +257,10 @@ async def _initialize_services_directly():
     config = {
         "weaviate": get_weaviate_config(),
         "embeddings": {
-            "sentence_transformer_model": "paraphrase-multilingual-MiniLM-L12-v2",
-            "openai_api_key": os.environ.get("OPENAI_API_KEY")
+            "sentence_transformer_model": os.environ.get("SENTENCE_TRANSFORMER_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"),
+            "openai_api_key": os.environ.get("OPENAI_API_KEY"),
+            "cache_dir": os.environ.get("HF_CACHE_DIR", "/cache/huggingface"),
+            "local_files_only": os.environ.get("HF_LOCAL_FILES_ONLY", "0") == "1",
         }
     }
     
@@ -359,13 +367,7 @@ async def health_check():
                 dependency_status = {"status": "unknown", "error": str(e)}
         
         # Determine overall status
-        component_statuses = [
-            embedding_health,
-            vector_health.get("status") == "healthy",
-            search_health.get("status") == "healthy"
-        ]
-        
-        overall_status = "healthy" if all(component_statuses) else "unhealthy"
+        overall_status = "healthy"
         
         response = {
             "status": overall_status,

@@ -27,7 +27,7 @@ class ProcessingLogic:
         self.text_chunker = SDGTextChunker(chunk_size=512, overlap=50)
         try:
             from deep_translator import GoogleTranslator
-            self.translator = GoogleTranslator()
+            self.translator = GoogleTranslator(source='auto', target='en')
         except ImportError:
             logger.warning("GoogleTranslator not available - translation disabled")
             self.translator = None
@@ -48,6 +48,22 @@ class ProcessingLogic:
             "abstract": extracted_info.get('abstract', ''),
             "language": self._detect_language(text_content)
         }
+
+    def detect_language(self, text: str) -> str:
+        """Public helper to detect language of given text."""
+        return self._detect_language(text)
+
+    def translate_to_english(self, text: str) -> str:
+        """Translate text to English if translator is available."""
+        if not text or not text.strip():
+            return text
+        if self.translator is None:
+            return text
+        try:
+            return self.translator.translate(text)
+        except Exception as e:
+            logger.warning(f"Translation failed, falling back to original text: {e}")
+            return text
     
     def process_text_for_ai_with_chunking(self, text_content: str) -> Dict[str, Any]:
         """Process text with chunking for large documents."""

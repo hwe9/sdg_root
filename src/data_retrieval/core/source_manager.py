@@ -33,8 +33,9 @@ class SourceManager:
             'feed': FeedSource()
         }
         
-        # Cache for processed URLs
+        # Cache for processed URLs and content hashes
         self._processed_urls_cache = None
+        self._processed_hashes_cache = None
         self._cache_last_updated = None
     
     async def initialize(self):
@@ -134,13 +135,47 @@ class SourceManager:
             logger.error(f"❌ Error loading processed URLs: {e}")
             return set()
     
-    async def mark_url_processed(self, url: str, status: str, filename: str = ""):
-        """Mark URL as processed with status"""
+    async def get_processed_content_hashes(self) -> Set[str]:
+        """Get set of already processed content hashes (for deduplication)"""
+        current_time = datetime.utcnow()
+        
+        # Use cache if recent (within 5 minutes)
+        if (self._processed_hashes_cache is not None and 
+            self._cache_last_updated is not None and
+            (current_time - self._cache_last_updated).seconds < 300):
+            return self._processed_hashes_cache
+        
+        processed_hashes = set()
+        
+        try:
+            if os.path.exists(self.downloaded_urls_file):
+                with open(self.downloaded_urls_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row.get('status') == 'success':
+                            content_hash = row.get('content_hash', '').strip()
+                            if content_hash:
+                                processed_hashes.add(content_hash)
+                
+                logger.info(f"✅ Loaded {len(processed_hashes)} processed content hashes from history")
+            
+            # Update cache
+            self._processed_hashes_cache = processed_hashes
+            self._cache_last_updated = current_time
+            
+            return processed_hashes
+            
+        except Exception as e:
+            logger.error(f"❌ Error loading processed content hashes: {e}")
+            return set()
+    
+    async def mark_url_processed(self, url: str, status: str, filename: str = "", content_hash: str = ""):
+        """Mark URL as processed with status and optional content hash"""
         try:
             file_exists = os.path.exists(self.downloaded_urls_file)
             
             with open(self.downloaded_urls_file, 'a', encoding='utf-8', newline='') as f:
-                fieldnames = ['url', 'filename', 'timestamp', 'status']
+                fieldnames = ['url', 'filename', 'timestamp', 'status', 'content_hash']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 
                 if not file_exists:
@@ -150,13 +185,15 @@ class SourceManager:
                     'url': url,
                     'filename': filename,
                     'timestamp': datetime.utcnow().isoformat(),
-                    'status': status
+                    'status': status,
+                    'content_hash': content_hash
                 })
             
             # Invalidate cache
             self._processed_urls_cache = None
+            self._processed_hashes_cache = None
             
-            logger.debug(f"✅ Marked URL as {status}: {url}")
+            logger.debug(f"✅ Marked URL as {status}: {url} (hash: {content_hash[:16] if content_hash else 'N/A'}...)")
             
         except Exception as e:
             logger.error(f"❌ Error marking URL processed: {e}")

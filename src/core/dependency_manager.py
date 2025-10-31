@@ -320,8 +320,12 @@ class DependencyManager:
             "vectorization": ServiceDependency(
                 name="vectorization",
                 url=os.getenv("VECTORIZATION_SERVICE_URL", "http://vectorization_service:8003"),
+                health_endpoint="/health",
                 required=True,
-                dependencies=["weaviate", "database"]
+                dependencies=["weaviate", "database"],
+                retry_attempts=20,
+                retry_delay=3.0,
+                initial_delay=15.0,
             ),
             "content_extraction": ServiceDependency(
                 name="content_extraction",

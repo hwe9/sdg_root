@@ -4,7 +4,6 @@ from typing import List
 from typing import Dict
 from typing import Any
 from typing import Optional
-from typing import Union
 import weaviate
 import numpy as np
 from weaviate.embedded import EmbeddedOptions
@@ -50,55 +49,80 @@ class VectorDBClient:
     
     def _initialize_client(self):
         try:
-            import weaviate.classes as wvc
             if self.config.get("embedded", False):
                 # Embedded Weaviate for development
-                self.client = weaviate.connect_to_embedded(
-                    port=self.config.get("port", 8080),
-                    grpc_port=self.config.get("grpc_port", 50051)
+                self.client = weaviate.Client(
+                    embedded_options=EmbeddedOptions(
+                        hostname=self.config.get("hostname", "localhost"),
+                        port=self.config.get("port", 8080),
+                        grpc_port=self.config.get("grpc_port", 50051)
+                    )
                 )
             else:
-                # Remote Weaviate instance mit URL-Validierung
+                # Remote Weaviate instance with URL validation (v3 client)
                 weaviate_url = self.config.get("url", "http://localhost:8080")
-                
-                # URL-Validierung hinzufügen
+
                 if not weaviate_url.startswith(('http://', 'https://')):
                     raise ValueError(f"Invalid Weaviate URL format: {weaviate_url}")
-                
-                auth_config = None
-                if self.config.get("api_key"):
-                    auth_config = weaviate.AuthApiKey(api_key=self.config["api_key"])
-                
-                headers = {}
+
+                additional_headers = None
                 if self.config.get("openai_api_key"):
-                    headers["X-OpenAI-Api-Key"] = self.config["openai_api_key"]
-                
-                self.client = weaviate.Client(
-                    url=weaviate_url,  # Validierte URL verwenden
-                    auth_client_secret=auth_config,
-                    additional_headers=headers
-                )
-            
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    if self.client.is_ready():
-                        logger.info(f"Weaviate client initialized successfully (attempt {attempt + 1})")
+                    additional_headers = {"X-OpenAI-Api-Key": self.config["openai_api_key"]}
+
+                api_key = (self.config.get("api_key") or "").strip()
+                connection_errors = []
+
+                # Try anonymous access first, then fall back to API key if needed
+                try_order = [False, True] if api_key else [False]
+
+                for use_auth in try_order:
+                    try:
+                        auth_config = None
+                        if use_auth and api_key:
+                            auth_config = weaviate.AuthApiKey(api_key=api_key)
+
+                        self.client = weaviate.Client(
+                            url=weaviate_url,
+                            auth_client_secret=auth_config,
+                            additional_headers=additional_headers
+                        )
+                        mode = "with API key" if use_auth else "without authentication"
+                        self._wait_for_client_ready(mode)
                         break
-                    else:
-                        raise ConnectionError(f"Weaviate client not ready (attempt {attempt + 1})")
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        logger.error(f"Failed to establish Weaviate connection after {max_retries} attempts: {e}")
+                    except weaviate.exceptions.UnexpectedStatusCodeException as e:
+                        message = str(e)
+                        connection_errors.append(message)
+                        if "oidc auth is not configured" in message.lower() and use_auth:
+                            logger.warning("Weaviate rejected API key authentication; retrying without auth")
+                            continue
+                        if not use_auth and api_key and ("401" in message or "unauthorized" in message.lower()):
+                            logger.info("Weaviate requires authentication; retrying with API key")
+                            continue
                         raise
-                    else:
-                        logger.warning(f"Weaviate connection attempt {attempt + 1} failed: {e}")
-                        time.sleep(2 ** attempt)  # Exponential backoff
-                
+                    except Exception as e:
+                        connection_errors.append(str(e))
+                        raise
+                else:
+                    raise RuntimeError(f"Failed to initialize Weaviate client ({connection_errors})")
+
         except Exception as e:
             logger.error(f"Error initializing Weaviate client: {e}")
             raise
-    
+
+    def _wait_for_client_ready(self, mode: str):
+        max_retries = self.retry_attempts
+        for attempt in range(max_retries):
+            try:
+                if self.client.is_ready():
+                    logger.info(f"Weaviate client initialized successfully ({mode}, attempt {attempt + 1})")
+                    return
+                raise ConnectionError(f"Weaviate client not ready (attempt {attempt + 1})")
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                logger.warning(f"Weaviate readiness check attempt {attempt + 1} failed: {e}")
+                time.sleep(self.retry_delay * (2 ** attempt))
+
     def _setup_sdg_schema(self):
         """Setup SDG schema with version compatibility check"""
         try:
@@ -436,16 +460,12 @@ class VectorDBClient:
         try:
             is_ready = self.client.is_ready()
             is_live = self.client.is_live()
-            meta = self.client.get_meta() or {}
-            version = None
-            
+
             return {
                 "status": "healthy" if is_ready and is_live else "unhealthy",
                 "ready": is_ready,
                 "live": is_live,
-                "meta": {"version": version},
                 "timestamp": datetime.utcnow().isoformat(),
-                "statistics": self.get_statistics()
             }
         except Exception as e:
             return {

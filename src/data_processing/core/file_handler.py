@@ -83,6 +83,58 @@ class FileHandler:
         except Exception as e:
             print(f"Fehler beim Extrahieren von Text oder Metadaten aus PDF: {e}")
         return text, metadata
+    
+    def convert_pdf_to_txt(self, pdf_path: str, txt_path: str = None) -> str:
+        """Extract text from PDF and save as .txt file.
+        
+        Args:
+            pdf_path: Path to input PDF file
+            txt_path: Optional output path. If None, uses same path with .txt extension
+            
+        Returns:
+            Path to created .txt file
+        """
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        
+        if not pdf_path.lower().endswith('.pdf'):
+            raise ValueError(f"File is not a PDF: {pdf_path}")
+        
+        # Extract text
+        text, metadata = self.extract_text_from_pdf(pdf_path)
+        
+        if not text.strip():
+            print(f"Warning: No text extracted from PDF: {pdf_path}")
+        
+        # Determine output path
+        if txt_path is None:
+            base_path = os.path.splitext(pdf_path)[0]
+            txt_path = f"{base_path}.txt"
+        
+        # Ensure output directory exists
+        output_dir = os.path.dirname(txt_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        
+        # Save as .txt file
+        try:
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                # Optional: Add metadata header
+                if metadata.get('title'):
+                    f.write(f"Title: {metadata['title']}\n")
+                if metadata.get('authors'):
+                    f.write(f"Authors: {metadata['authors']}\n")
+                if metadata.get('creation_date'):
+                    f.write(f"Creation Date: {metadata['creation_date']}\n")
+                if any(metadata.values()):
+                    f.write("\n" + "="*80 + "\n\n")
+                
+                f.write(text)
+            
+            print(f"✅ Converted PDF to TXT: {pdf_path} -> {txt_path}")
+            return txt_path
+        except Exception as e:
+            raise IOError(f"Failed to save TXT file: {e}")
 
     def extract_text_from_docx(self, file_path: str) -> str:
         text = ""
@@ -105,6 +157,25 @@ class FileHandler:
             print(f"Fehler beim Extrahieren von Text aus CSV: {e}")
         return text
 
+    def extract_text_from_html(self, file_path: str) -> str:
+        """Extract text from HTML file, removing HTML tags."""
+        text = ""
+        try:
+            import re
+            with open(file_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+                # Remove script and style elements
+                html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+                html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+                # Remove HTML tags
+                text = re.sub(r'<[^>]+>', '', html_content)
+                # Clean up whitespace
+                text = re.sub(r'\s+', ' ', text)
+                text = text.strip()
+        except Exception as e:
+            print(f"Fehler beim Extrahieren von Text aus HTML: {e}")
+        return text
+
     def extract_text(self, file_path: str) -> str:
         if file_path.endswith('.mp3'):
             return ""
@@ -115,6 +186,8 @@ class FileHandler:
             return self.extract_text_from_docx(file_path)
         elif file_path.endswith('.csv'):
             return self.extract_text_from_csv(file_path)
+        elif file_path.endswith('.html') or file_path.endswith('.htm'):
+            return self.extract_text_from_html(file_path)
         else:
             return self.get_text_from_file(file_path)
 

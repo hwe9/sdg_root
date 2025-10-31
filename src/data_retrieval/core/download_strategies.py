@@ -4,6 +4,7 @@ import logging
 from typing import Dict
 from typing import Any
 from typing import Optional
+from typing import List
 from datetime import datetime
 from urllib.parse import urlparse
 import aiofiles
@@ -136,10 +137,228 @@ class HTTPDownloadStrategy(DownloadStrategy):
             return None
 
 class YouTubeDownloadStrategy(DownloadStrategy):
-    """YouTube content extraction"""
+    """YouTube content extraction with filtering for Shorts and sponsored content"""
+    
+    def _is_shorts_video(self, url: str, info: Dict[str, Any]) -> bool:
+        """Check if video is a YouTube Short"""
+        # Check URL for /shorts/ path
+        if "/shorts/" in url.lower():
+            return True
+        
+        # Check duration (Shorts are typically under 60 seconds)
+        duration = info.get("duration")
+        if duration and duration < 60:
+            return True
+        
+        # Check category
+        categories = info.get("categories", [])
+        if categories and any("short" in str(cat).lower() for cat in categories):
+            return True
+        
+        # Check tags
+        tags = info.get("tags", [])
+        if tags and any("short" in str(tag).lower() for tag in tags):
+            return True
+        
+        return False
+    
+    def _is_sponsored_video(self, info: Dict[str, Any]) -> bool:
+        """Check if video is sponsored content"""
+        # Check tags for sponsor-related keywords
+        tags = info.get("tags", [])
+        sponsor_keywords = ["sponsor", "sponsored", "advertisement", "ad", "promo", "promotional", "paid", "partnership"]
+        if tags:
+            tag_text = " ".join(str(tag).lower() for tag in tags)
+            if any(keyword in tag_text for keyword in sponsor_keywords):
+                return True
+        
+        # Check description for sponsor mentions
+        description = info.get("description", "").lower()
+        sponsor_patterns = [
+            "sponsored by",
+            "sponsor:",
+            "this video is sponsored",
+            "paid partnership",
+            "advertisement",
+            "thanks to [",
+            "in partnership with"
+        ]
+        if any(pattern in description for pattern in sponsor_patterns):
+            return True
+        
+        # Check for SponsorBlock chapters (if available)
+        sponsorblock_chapters = info.get("sponsorblock_chapters")
+        if sponsorblock_chapters:
+            # If SponsorBlock data exists and has sponsor segments, it's likely sponsored
+            return True
+        
+        return False
+    
+    def _extract_transcript(self, info: Dict[str, Any], ydl: Any) -> Optional[str]:
+        """Extract transcript/subtitles from YouTube video if available"""
+        try:
+            # Try to get auto-generated or manual subtitles
+            subtitles = info.get('subtitles', {})
+            automatic_captions = info.get('automatic_captions', {})
+            
+            # Preferred languages in order (English first, then others)
+            preferred_langs = ['en', 'en-US', 'en-GB', 'de', 'fr', 'es', 'hi', 'zh', 'zh-CN', 'zh-TW', 'hi-IN']
+            
+            # Combine subtitles and automatic captions
+            all_captions = {}
+            if subtitles:
+                all_captions.update(subtitles)
+            if automatic_captions:
+                all_captions.update(automatic_captions)
+            
+            if not all_captions:
+                return None
+            
+            # Try preferred languages first
+            for lang in preferred_langs:
+                if lang in all_captions:
+                    caption_list = all_captions[lang]
+                    if caption_list:
+                        # Get the best format (usually the first one)
+                        caption_url = caption_list[0].get('url')
+                        if caption_url:
+                            try:
+                                # Download subtitle content
+                                import urllib.request
+                                with urllib.request.urlopen(caption_url, timeout=10) as response:
+                                    subtitle_data = response.read().decode('utf-8')
+                                
+                                # Parse WebVTT or SRT format and extract text
+                                transcript_text = self._parse_subtitle_format(subtitle_data)
+                                if transcript_text:
+                                    logger.info(f"✅ Extracted transcript in {lang}")
+                                    return transcript_text
+                            except Exception as e:
+                                logger.debug(f"Failed to download caption for {lang}: {e}")
+                                continue
+            
+            # If no preferred language found, try any available language
+            for lang, caption_list in all_captions.items():
+                if caption_list:
+                    caption_url = caption_list[0].get('url')
+                    if caption_url:
+                        try:
+                            import urllib.request
+                            with urllib.request.urlopen(caption_url, timeout=10) as response:
+                                subtitle_data = response.read().decode('utf-8')
+                            transcript_text = self._parse_subtitle_format(subtitle_data)
+                            if transcript_text:
+                                logger.info(f"✅ Extracted transcript in {lang}")
+                                return transcript_text
+                        except Exception as e:
+                            logger.debug(f"Failed to download caption for {lang}: {e}")
+                            continue
+            
+            return None
+        except Exception as e:
+            logger.debug(f"Error extracting transcript: {e}")
+            return None
+    
+    def _parse_subtitle_format(self, subtitle_data: str) -> str:
+        """Parse WebVTT or SRT subtitle format and extract text"""
+        lines = subtitle_data.split('\n')
+        text_parts = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip timing lines, headers, and empty lines
+            if not line or line.startswith('WEBVTT') or line.startswith('<?xml') or \
+               '-->' in line or line.startswith('<') or line.isdigit():
+                continue
+            # Skip HTML tags
+            if line.startswith('<') and line.endswith('>'):
+                continue
+            # Add text content
+            if line:
+                text_parts.append(line)
+        
+        return ' '.join(text_parts).strip()
+    
+    async def _process_video_entry(self, url: str, info: Dict[str, Any], data_dir: str, ydl: Any,
+                                   playlist_title: Optional[str] = None, playlist_url: Optional[str] = None) -> Dict[str, Any]:
+        if self._is_shorts_video(url, info):
+            logger.info(f"⏭️ Skipping YouTube Short: {url} (duration: {info.get('duration', 'unknown')}s)")
+            return {
+                "filtered": True,
+                "filter_reason": "youtube_short",
+                "download_method": "youtube",
+                "source_url": url,
+                "playlist_title": playlist_title,
+                "playlist_url": playlist_url
+            }
+        
+        if self._is_sponsored_video(info):
+            logger.info(f"⏭️ Skipping sponsored video: {url} (title: {info.get('title', 'unknown')})")
+            return {
+                "filtered": True,
+                "filter_reason": "sponsored_content",
+                "download_method": "youtube",
+                "source_url": url,
+                "playlist_title": playlist_title,
+                "playlist_url": playlist_url
+            }
+        
+        transcript_text = self._extract_transcript(info, ydl)
+        if not transcript_text:
+            logger.info(f"⏭️ Skipping YouTube video (no transcript available): {url} (title: {info.get('title', 'unknown')})")
+            return {
+                "filtered": True,
+                "filter_reason": "no_transcript",
+                "download_method": "youtube",
+                "source_url": url,
+                "playlist_title": playlist_title,
+                "playlist_url": playlist_url
+            }
+        
+        filename = f"youtube_{hashlib.md5(url.encode()).hexdigest()[:8]}.txt"
+        file_path = os.path.join(data_dir, filename)
+        
+        async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
+            await f.write(transcript_text)
+        
+        import json
+        metadata = {
+            "title": info.get("title"),
+            "uploader": info.get("uploader"),
+            "upload_date": info.get("upload_date"),
+            "duration": info.get("duration"),
+            "view_count": info.get("view_count"),
+            "source_url": url,
+            "content_type": "transcript",
+            "has_transcript": True
+        }
+        if playlist_title:
+            metadata["playlist_title"] = playlist_title
+        if playlist_url:
+            metadata["playlist_url"] = playlist_url
+        
+        metadata_filename = f"youtube_{hashlib.md5(url.encode()).hexdigest()[:8]}.json"
+        metadata_path = os.path.join(data_dir, metadata_filename)
+        
+        async with aiofiles.open(metadata_path, 'w', encoding='utf-8') as f:
+            await f.write(json.dumps(metadata, ensure_ascii=False, indent=2))
+        
+        return {
+            "title": filename,
+            "file_path": file_path,
+            "content_type": "text/plain",
+            "file_size": os.path.getsize(file_path),
+            "download_method": "youtube",
+            "downloaded_at": datetime.utcnow().isoformat(),
+            "metadata": metadata,
+            "has_transcript": True,
+            "source_url": url,
+            "playlist_title": playlist_title,
+            "playlist_url": playlist_url
+        }
     
     async def download(self, url: str, data_dir: str) -> Optional[Dict[str, Any]]:
-        """Extract YouTube metadata without downloading video"""
+        """Extract YouTube metadata and transcript (if available), excluding Shorts and sponsored content"""
         try:
             from yt_dlp import YoutubeDL
             from yt_dlp.utils import DownloadError
@@ -148,41 +367,50 @@ class YouTubeDownloadStrategy(DownloadStrategy):
             ydl_opts = {
                 "skip_download": True,
                 "quiet": True,
-                "no_warnings": True
+                "no_warnings": True,
+                "writesubtitles": False,
+                "writeautomaticsub": False
             }
             
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
             
-            # Save metadata as JSON
-            filename = f"youtube_{hashlib.md5(url.encode()).hexdigest()[:8]}.json"
-            file_path = os.path.join(data_dir, filename)
+            # Handle playlists by iterating through entries
+            if info.get("_type") == "playlist":
+                playlist_title = info.get("title")
+                entries = info.get("entries") or []
+                processed_entries: List[Dict[str, Any]] = []
+                for entry in entries:
+                    video_url = entry.get("webpage_url") or entry.get("url")
+                    if not video_url:
+                        continue
+                    video_info = entry
+                    if entry.get("_type") in {"url", "url_transparent"} or not entry.get("duration"):
+                        try:
+                            video_info = ydl.extract_info(video_url, download=False)
+                        except Exception as ex:
+                            logger.warning(f"Failed to extract playlist entry {video_url}: {ex}")
+                            processed_entries.append({
+                                "filtered": True,
+                                "filter_reason": "playlist_extract_error",
+                                "download_method": "youtube",
+                                "source_url": video_url,
+                                "playlist_title": playlist_title,
+                                "playlist_url": url
+                            })
+                            continue
+                    result = await self._process_video_entry(video_url, video_info, data_dir, ydl,
+                                                              playlist_title=playlist_title, playlist_url=url)
+                    processed_entries.append(result)
+                return {
+                    "playlist": True,
+                    "playlist_title": playlist_title,
+                    "playlist_url": url,
+                    "entries": processed_entries
+                }
             
-            import json
-            metadata = {
-                "title": info.get("title"),
-                "description": info.get("description"),
-                "uploader": info.get("uploader"),
-                "upload_date": info.get("upload_date"),
-                "duration": info.get("duration"),
-                "view_count": info.get("view_count"),
-                "like_count": info.get("like_count"),
-                "tags": info.get("tags", []),
-                "categories": info.get("categories", [])
-            }
-            
-            async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(metadata, ensure_ascii=False, indent=2))
-            
-            return {
-                "title": filename,
-                "file_path": file_path,
-                "content_type": "application/json",
-                "file_size": os.path.getsize(file_path),
-                "download_method": "youtube",
-                "downloaded_at": datetime.utcnow().isoformat(),
-                "metadata": metadata
-            }
+            # Single video handling
+            return await self._process_video_entry(url, info, data_dir, ydl)
             
         except (DownloadError, ExtractorError) as e:
             logger.error(f"YouTube extraction error: {e}")

@@ -124,6 +124,29 @@ def get_weaviate_client():
         _create_weaviate_schema(client)
     return client
 
+def _ensure_content_hash_in_schema(client):
+    """Ensure content_hash property exists in ArticleVector schema"""
+    try:
+        # Handle adapter pattern: access underlying Weaviate client
+        weaviate_client = getattr(client, '_client', client)
+        
+        class_obj = weaviate_client.schema.get("ArticleVector")
+        existing_properties = {prop.get("name") for prop in class_obj.get("properties", [])}
+        
+        if "contentHash" not in existing_properties:
+            # Add content_hash property to existing schema
+            property_definition = {
+                "dataType": ["string"],
+                "description": "MD5 hash of content for deduplication",
+                "name": "contentHash"
+            }
+            weaviate_client.schema.property.create("ArticleVector", property_definition)
+            logger.info("✅ Added contentHash property to ArticleVector schema")
+        else:
+            logger.debug("contentHash property already exists in ArticleVector schema")
+    except Exception as e:
+        logger.warning(f"Could not ensure contentHash in schema (may not exist yet): {e}")
+
 def _create_weaviate_schema(client):
     class_obj = {
         "class": "ArticleVector",
@@ -136,10 +159,14 @@ def _create_weaviate_schema(client):
             {"name": "sdgGoals", "dataType": ["int[]"], "description": "Related SDG goals"},
             {"name": "language", "dataType": ["text"], "description": "Content language"},
             {"name": "region", "dataType": ["text"], "description": "Geographic region"},
+            {"name": "contentHash", "dataType": ["string"], "description": "MD5 hash of content for deduplication"},
         ],
     }
     client.schema.create_class(class_obj)
     logger.info("Created ArticleVector schema in Weaviate")
+    
+    # Ensure content_hash is in schema (in case schema already existed)
+    _ensure_content_hash_in_schema(client)
 
 async def save_to_database(metadata: Dict[str, Any], text_content: str, embeddings: List[float], chunks_data: Optional[List[Dict]] = None):
     """Async‑Pfad via Dependency‑Manager wie im Original."""
@@ -165,6 +192,11 @@ async def save_to_database(metadata: Dict[str, Any], text_content: str, embeddin
 def _save_to_weaviate_via_client(vector_client, article_id: int, text_content: str, embeddings: List[float],
                                  chunks_data: Optional[List[Dict]] = None, metadata: Dict[str, Any] = None):
     try:
+        # Ensure content_hash property exists in schema
+        _ensure_content_hash_in_schema(vector_client)
+        
+        content_hash = (metadata or {}).get('content_hash', '')
+        
         if chunks_data and len(chunks_data) > 0:
             for i, chunk_data in enumerate(chunks_data):
                 chunk_vector = chunk_data.get("embedding") or embeddings
@@ -174,7 +206,8 @@ def _save_to_weaviate_via_client(vector_client, article_id: int, text_content: s
                     "chunkId": i,
                     "sdgGoals": (metadata or {}).get('sdg_goals', []),
                     "language": (metadata or {}).get('language', 'en'),
-                    "region": (metadata or {}).get('region', '')
+                    "region": (metadata or {}).get('region', ''),
+                    "contentHash": content_hash
                 }
                 vector_client.insert_data(vector_data, "ArticleVector", chunk_vector)
         else:
@@ -184,7 +217,8 @@ def _save_to_weaviate_via_client(vector_client, article_id: int, text_content: s
                 "chunkId": 0,
                 "sdgGoals": (metadata or {}).get('sdg_goals', []),
                 "language": (metadata or {}).get('language', 'en'),
-                "region": (metadata or {}).get('region', '')
+                "region": (metadata or {}).get('region', ''),
+                "contentHash": content_hash
             }
             vector_client.insert_data(vector_data, "ArticleVector", embeddings)
         logger.info(f"✅ Vector data for article {article_id} saved via dependency manager")
@@ -200,8 +234,13 @@ def _save_to_weaviate(article_id: int, text_content: str, embeddings: List[float
     try:
         try:
             client.schema.get("ArticleVector")
+            # Ensure content_hash exists in existing schema
+            _ensure_content_hash_in_schema(client)
         except weaviate.exceptions.UnexpectedStatusCodeException:
             _create_weaviate_schema(client)
+        
+        content_hash = (metadata or {}).get('content_hash', '')
+        
         if chunks_data and len(chunks_data) > 0:
             for i, chunk_data in enumerate(chunks_data):
                 chunk_vector = chunk_data.get("embedding") or embeddings
@@ -211,7 +250,8 @@ def _save_to_weaviate(article_id: int, text_content: str, embeddings: List[float
                     "chunkId": i,
                     "sdgGoals": (metadata or {}).get('sdg_goals', []),
                     "language": (metadata or {}).get('language', 'en'),
-                    "region": (metadata or {}).get('region', '')
+                    "region": (metadata or {}).get('region', ''),
+                    "contentHash": content_hash
                 }
                 client.data_object.create(
                     data_object=vector_data,
@@ -225,7 +265,8 @@ def _save_to_weaviate(article_id: int, text_content: str, embeddings: List[float
                 "chunkId": 0,
                 "sdgGoals": (metadata or {}).get('sdg_goals', []),
                 "language": (metadata or {}).get('language', 'en'),
-                "region": (metadata or {}).get('region', '')
+                "region": (metadata or {}).get('region', ''),
+                "contentHash": content_hash
             }
             client.data_object.create(
                 data_object=vector_data,
@@ -247,7 +288,7 @@ def _insert_article(connection, metadata: Dict[str, Any], text_content: str) -> 
             data_sources, funding, funding_info, bias_indicators, abstract_original, 
             abstract_english, relevance_questions, source_url, availability, 
             citation_count, impact_metrics, impact_factor, policy_impact,
-            word_count, content_quality_score, created_at
+            word_count, content_quality_score, content_hash, created_at
         ) VALUES (
             :title, :content_original, :content_english, :summary, :keywords, :sdg_id,
             :authors, :publication_year, :publication_date, :publisher, :doi, :isbn,
@@ -255,7 +296,7 @@ def _insert_article(connection, metadata: Dict[str, Any], text_content: str) -> 
             :data_sources, :funding, :funding_info, :bias_indicators, :abstract_original,
             :abstract_english, :relevance_questions, :source_url, :availability,
             :citation_count, :impact_metrics, :impact_factor, :policy_impact,
-            :word_count, :content_quality_score, NOW()
+            :word_count, :content_quality_score, :content_hash, NOW()
         ) RETURNING id
     """)
     content_quality_score = _calculate_content_quality_score(metadata, text_content)
@@ -292,7 +333,8 @@ def _insert_article(connection, metadata: Dict[str, Any], text_content: str) -> 
         "impact_factor": metadata.get('impact_factor'),
         "policy_impact": metadata.get('policy_impact'),
         "word_count": len(text_content.split()) if text_content else 0,
-        "content_quality_score": content_quality_score
+        "content_quality_score": content_quality_score,
+        "content_hash": metadata.get('content_hash')  # MD5 hash from content validation
     }
     result = connection.execute(insert_query, params)
     return result.scalar_one()
@@ -516,7 +558,7 @@ def search_similar_content(query_embedding: List[float], limit: int = 10, sdg_fi
         client = get_weaviate_client()
         query_builder = (
             client.query
-            .get("ArticleVector", ["text", "articleId", "sdgGoals", "language", "region"])
+            .get("ArticleVector", ["text", "articleId", "chunkId", "sdgGoals", "language", "region", "contentHash"])
             .with_near_vector({"vector": query_embedding, "certainty": 0.7})
             .with_limit(limit)
             .with_additional(["certainty", "distance"])

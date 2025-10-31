@@ -8,7 +8,7 @@ transformers==4.44.2  # Hugging Face transformers
 torch==2.1.0  # PyTorch
 numpy==1.24.3  # Numerical computing
 scikit-learn==1.3.0  # Machine learning
-weaviate-client==4.16.10  # Weaviate client
+weaviate-client>=3.26.7,<4.0.0  # Weaviate client
 openai==1.40.0  # OpenAI API
 networkx==3.2  # Graph processing
 asyncio-mqtt==0.13.0  # MQTT client

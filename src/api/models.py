@@ -189,6 +189,7 @@ class Article(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     processed_at = Column(DateTime(timezone=True))
     content_quality_score = Column(Float, default=0.0)
+    content_hash = Column(String(64), index=True)  # MD5 hash of content for deduplication
 
     tags = relationship("Tag", secondary=articles_tags, back_populates="articles")
     ai_topics = relationship("AiTopic", secondary=articles_ai_topics, back_populates="articles")
@@ -280,6 +281,7 @@ class SdgInterlinkage(Base):
 Index('idx_articles_sdg_region_year', Article.sdg_id, Article.region, Article.publication_year)
 Index('idx_articles_language_quality', Article.language, Article.content_quality_score)
 Index('idx_articles_has_embeddings', Article.has_embeddings)
+Index('idx_articles_content_hash', Article.content_hash)  # Index for content hash lookups
 Index('idx_chunks_article_order', ArticleChunk.article_id, ArticleChunk.chunk_order)
 Index('idx_progress_actor_sdg_year', SdgProgress.actor_id, SdgProgress.sdg_id, SdgProgress.year)
 

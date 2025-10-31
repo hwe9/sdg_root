@@ -25,6 +25,7 @@ from core.db_utils import save_to_database
 from core.file_handler import FileHandler
 from core.processing_logic import ProcessingLogic
 from core.api_client import ApiClient
+from core.google_drive_uploader import upload_file_to_drive
 from ..core.health_utils import HealthCheckResponse
 
 # Add after existing imports - DEPENDENCY MANAGEMENT INTEGRATION
@@ -306,12 +307,15 @@ async def process_content_endpoint(request: ProcessContentRequest):
         for item in request.content_items:
             content = item.get('content', '')
             metadata = item.get('metadata', {})
+
+            english_variant = prepare_language_variants(content, metadata)
+            processing_text = english_variant if metadata.get('language') != 'en' else content
             
-            if len(content) > 1000:
-                processed_data = process_large_document(content, metadata)
+            if len(processing_text) > 1000:
+                processed_data = process_large_document(processing_text, metadata)
                 save_to_database(metadata, content, processed_data['combined_embeddings'], processed_data.get('chunks'))
             else:
-                processed_data = processing_logic.process_text_for_ai(content)
+                processed_data = processing_logic.process_text_for_ai(processing_text)
                 save_to_database(metadata, content, processed_data['embeddings'])
             
             processed_count += 1
@@ -380,24 +384,43 @@ def run_processing_worker():
                         os.remove(metadata_path)
                         continue
 
+                    # Convert PDF to TXT before processing (original PDF will be deleted)
+                    if media_path.endswith('.pdf'):
+                        try:
+                            logger.info(f"Converting PDF to TXT: {media_path}")
+                            txt_path = file_handler.convert_pdf_to_txt(media_path)
+                            # Delete original PDF after conversion (we have source_url in metadata)
+                            os.remove(media_path)
+                            logger.info(f"✅ Converted PDF to TXT and deleted original PDF")
+                            media_path = txt_path  # Use TXT for text extraction
+                        except Exception as e:
+                            logger.error(f"Failed to convert PDF to TXT: {e}")
+                            # Continue with original PDF if conversion fails
+                            pass
+
                     text_content = extract_content(media_path, file_handler, processing_logic)
-                    
+
                     if not text_content:
                         logger.warning(f"No content extracted from {media_path}")
                         continue
-                    
+
+                    english_variant = prepare_language_variants(text_content, metadata)
+                    processing_text = english_variant if metadata.get('language') != 'en' else text_content
+
                     # Use enhanced processing
-                    if len(text_content) > 1000:
-                        processed_data = process_large_document(text_content, metadata)
+                    if len(processing_text) > 1000:
+                        processed_data = process_large_document(processing_text, metadata)
                         save_to_database(metadata, text_content, processed_data['combined_embeddings'], processed_data.get('chunks'))
                     else:
-                        processed_data = processing_logic.process_text_for_ai(text_content)
+                        processed_data = processing_logic.process_text_for_ai(processing_text)
                         save_to_database(metadata, text_content, processed_data['embeddings'])
 
                     save_backup(metadata, text_content, processed_data, base_name, PROCESSED_DATA_DIR)
 
                     os.remove(metadata_path)
-                    os.remove(media_path)
+                    # Only delete media file if it wasn't already deleted (PDF case)
+                    if os.path.exists(media_path):
+                        os.remove(media_path)
                     logger.info(f"✅ Processing of {json_file_name} completed successfully")
 
                 except Exception as e:
@@ -435,7 +458,8 @@ def extract_api_metadata(source_url: str, api_client: ApiClient) -> dict:
 
 def find_media_file(base_name: str, data_dir: str) -> str:
     """Find media file with given base name."""
-    for ext in ['.mp3', '.txt', '.pdf', '.docx', '.csv']:
+    # Check for HTML files first, then other types
+    for ext in ['.html', '.htm', '.mp3', '.txt', '.pdf', '.docx', '.csv', '.xml']:
         potential_path = os.path.join(data_dir, f"{base_name}{ext}")
         if os.path.exists(potential_path):
             return potential_path
@@ -448,18 +472,76 @@ def extract_content(media_path: str, file_handler: FileHandler, processing_logic
     else:
         return file_handler.extract_text(media_path)
 
+
+def prepare_language_variants(text_content: str, metadata: dict) -> str:
+    """Ensure metadata contains language info and an English text variant."""
+    if not processing_logic:
+        metadata['language'] = metadata.get('language', 'en')
+        metadata['content_english'] = text_content
+        return text_content
+
+    language = processing_logic.detect_language(text_content)
+    metadata['language'] = language
+
+    if language != 'en':
+        translated = processing_logic.translate_to_english(text_content)
+        metadata['content_english'] = translated
+
+        def translate_field(field_name: str, store_original: bool = True, target_field: str = None):
+            value = metadata.get(field_name)
+            if not value:
+                return
+            if isinstance(value, list):
+                value_str = ' '.join(map(str, value))
+            elif isinstance(value, str):
+                value_str = value
+            else:
+                return
+            if store_original:
+                original_field = f"{field_name}_original"
+                metadata.setdefault(original_field, value)
+            translated_value = processing_logic.translate_to_english(value_str)
+            if target_field:
+                metadata[target_field] = translated_value
+            else:
+                metadata[field_name] = translated_value
+
+        # Translate commonly used metadata fields to English
+        translate_field('title')
+        translate_field('summary')
+        translate_field('description')
+        translate_field('keywords', store_original=True)
+
+        abstract_source = metadata.get('abstract_original') or metadata.get('abstract')
+        if abstract_source and isinstance(abstract_source, str):
+            metadata.setdefault('abstract_original', abstract_source)
+            if not metadata.get('abstract_english'):
+                metadata['abstract_english'] = processing_logic.translate_to_english(abstract_source)
+
+        return translated
+
+    metadata['content_english'] = text_content
+    return text_content
+
 def save_backup(metadata: dict, text_content: str, processed_data: dict, base_name: str, processed_dir: str):
-    """Save processed data as JSON backup."""
+    """Save processed data as JSON backup including metadata and language variants."""
     backup_path = os.path.join(processed_dir, f"{base_name}_processed.json")
     backup_content = {
         "metadata": metadata,
-        "text": text_content,
+        "content_original": text_content,
+        "content_english": metadata.get('content_english', text_content),
         "processed_data": processed_data,
         "backup_timestamp": datetime.datetime.utcnow().isoformat()
     }
     with open(backup_path, 'w', encoding='utf-8') as f:
         json.dump(backup_content, f, indent=4, ensure_ascii=False)
     logger.info(f"Backup saved: {backup_path}")
+
+    # Upload JSON backup to Google Drive if enabled via env
+    try:
+        upload_file_to_drive(backup_path)
+    except Exception as e:
+        logger.warning(f"Google Drive upload skipped/failed: {e}")
 
 # Modified main function with dependency management
 if __name__ == "__main__":

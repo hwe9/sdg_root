@@ -12,3 +12,7 @@ Pillow  # Image processing
 pytesseract  # OCR
 deep_translator  # Translation
 weaviate-client==4.16.10  # Weaviate client
+google-api-python-client==2.149.0  # Google Drive API
+google-auth==2.35.0  # Google auth
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1

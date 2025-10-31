@@ -2,7 +2,7 @@
 import os
 import json
 from enum import Enum
-from typing import List
+from typing import List, Union
 from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
@@ -16,7 +16,7 @@ class Environment(str, Enum):
 class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = False
-    allowed_origins: list[str] = []
+    allowed_origins: Union[str, list[str]] = ""
     jwt_algorithm: str = "RS256"
     password_min_length: int = 8
     rate_limit_per_minute: int = 60
@@ -29,11 +29,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
         env_aliases={"allowed_origins": ["ALLOWED_ORIGINS", "ALLOWEDORIGINS"]},
+        env_parse_none_str="",
     )
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
-    def parse_allowed_origins(cls, v: Any):
+    def parse_allowed_origins(cls, v: Any) -> list[str]:
         # None -> []
         if v is None:
             return []
@@ -45,13 +46,16 @@ class Settings(BaseSettings):
             s = v.strip()
             if not s:
                 return []
+            # Try JSON parsing first if it looks like JSON
             if s.startswith("["):
                 try:
                     data = json.loads(s)
-                    return [str(x).strip() for x in data if str(x).strip()]
-                except Exception:
-                    # Fall through to CSV parsing
+                    if isinstance(data, list):
+                        return [str(x).strip() for x in data if str(x).strip()]
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    # Fall back to CSV parsing if JSON fails
                     pass
+            # CSV parsing
             return [x.strip() for x in s.split(",") if x.strip()]
         # Fallback: coerce to list[str] or empty
         try:
